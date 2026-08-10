@@ -17,7 +17,8 @@ public sealed class MysticLightApiClient : IDisposable
 
     public MysticLightApiClient(string baseUrl, string? apiToken = null, TimeSpan? timeout = null)
     {
-        var root = baseUrl.TrimEnd('/') + "/";
+        // Accept "192.168.x.x:17700" without scheme — Uri("host:port") throws invalid scheme.
+        var root = RemoteUrl.Normalize(baseUrl);
         _http = new HttpClient { BaseAddress = new Uri(root), Timeout = timeout ?? TimeSpan.FromSeconds(5) };
         if (!string.IsNullOrWhiteSpace(apiToken))
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiToken);

@@ -1,4 +1,5 @@
 using RgbFx.Service;
+using RgbFx.Service.Client;
 using RgbFx.Service.Config;
 
 namespace RgbFx.UI;
@@ -12,7 +13,7 @@ public sealed class MainForm : Form
     private readonly BridgeHost _host = new();
     private readonly ListBox _list = new() { Dock = DockStyle.Fill };
     private readonly TextBox _name = new() { PlaceholderText = "Name" };
-    private readonly TextBox _url = new() { PlaceholderText = "http://192.168.x.x:17700", Width = 280 };
+    private readonly TextBox _url = new() { PlaceholderText = "http://192.168.1.10:17700  or  192.168.1.10:17700", Width = 320 };
     private readonly TextBox _token = new() { PlaceholderText = "API token (optional)", Width = 180 };
     private readonly ComboBox _source = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
     private readonly Label _status = new() { AutoSize = true, Dock = DockStyle.Bottom, Padding = new Padding(8) };
@@ -121,17 +122,28 @@ public sealed class MainForm : Form
 
     private void OnAdd(object? sender, EventArgs e)
     {
+        var raw = string.IsNullOrWhiteSpace(_url.Text) ? "http://127.0.0.1:17700" : _url.Text.Trim();
+        if (!RemoteUrl.TryNormalize(raw, out var baseUrl, out var err))
+        {
+            MessageBox.Show(err ?? "Invalid URL", "Invalid remote URL", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        // Persist normalized form (always includes http://)
+        _url.Text = baseUrl.TrimEnd('/');
+
         var cfg = ReadUiConfig();
         cfg.Targets.Add(new RemoteTarget
         {
             Name = string.IsNullOrWhiteSpace(_name.Text) ? "MSI Host" : _name.Text.Trim(),
-            BaseUrl = string.IsNullOrWhiteSpace(_url.Text) ? "http://127.0.0.1:17700" : _url.Text.Trim(),
+            BaseUrl = baseUrl.TrimEnd('/'),
             ApiToken = string.IsNullOrWhiteSpace(_token.Text) ? null : _token.Text.Trim(),
         });
         if (cfg.ActiveTargetId == null && cfg.Targets.Count > 0)
             cfg.ActiveTargetId = cfg.Targets[0].Id;
         cfg.Save();
         LoadConfigToUi();
+        _status.Text = "Added remote: " + baseUrl.TrimEnd('/');
     }
 
     private void OnRemove(object? sender, EventArgs e)
