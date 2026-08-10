@@ -2,7 +2,8 @@ name: build
 
 on:
   push:
-    branches: [main, master]
+    # Run CI on main and feature work without requiring merge
+    branches: [main, master, "feature/**"]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
