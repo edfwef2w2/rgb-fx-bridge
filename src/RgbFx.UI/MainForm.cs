@@ -13,7 +13,7 @@ public sealed class MainForm : Form
     private readonly BridgeHost _host = new();
     private readonly ListBox _list = new() { Dock = DockStyle.Fill };
     private readonly TextBox _name = new() { PlaceholderText = "Name" };
-    private readonly TextBox _url = new() { PlaceholderText = "http://192.168.1.10:17700  or  192.168.1.10:17700", Width = 320 };
+    private readonly TextBox _url = new() { PlaceholderText = $"http://192.168.50.8:{RemoteUrl.DefaultPort}", Width = 320 };
     private readonly TextBox _token = new() { PlaceholderText = "API token (optional)", Width = 180 };
     private readonly ComboBox _source = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
     private readonly Label _status = new() { AutoSize = true, Dock = DockStyle.Bottom, Padding = new Padding(8) };
@@ -122,7 +122,9 @@ public sealed class MainForm : Form
 
     private void OnAdd(object? sender, EventArgs e)
     {
-        var raw = string.IsNullOrWhiteSpace(_url.Text) ? "http://127.0.0.1:17700" : _url.Text.Trim();
+        var raw = string.IsNullOrWhiteSpace(_url.Text)
+            ? $"http://127.0.0.1:{RemoteUrl.DefaultPort}"
+            : _url.Text.Trim();
         if (!RemoteUrl.TryNormalize(raw, out var baseUrl, out var err))
         {
             MessageBox.Show(err ?? "Invalid URL", "Invalid remote URL", MessageBoxButtons.OK, MessageBoxIcon.Warning);

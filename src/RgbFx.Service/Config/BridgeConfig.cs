@@ -48,6 +48,6 @@ public sealed class RemoteTarget
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "MSI Host";
-    public string BaseUrl { get; set; } = "http://127.0.0.1:17700";
+    public string BaseUrl { get; set; } = "http://127.0.0.1:17700"; // msi-mystic-light-web default port
     public string? ApiToken { get; set; }
 }

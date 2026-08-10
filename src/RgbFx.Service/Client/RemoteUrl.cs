@@ -2,9 +2,13 @@ namespace RgbFx.Service.Client;
 
 /// <summary>
 /// Normalize user-entered remote base URLs so missing http:// does not throw Invalid URI.
+/// MSI Mystic Light Web listens on port 17700 (never HTTP default 80).
 /// </summary>
 public static class RemoteUrl
 {
+    /// <summary>Default listen port of msi-mystic-light-web.</summary>
+    public const int DefaultPort = 17700;
+
     /// <summary>
     /// Accepts forms like:
     ///   http://192.168.1.10:17700
@@ -12,17 +16,17 @@ public static class RemoteUrl
     ///   192.168.1.10:17700
     ///   192.168.1.10
     /// Returns absolute URI with trailing slash for HttpClient BaseAddress.
+    /// Bare hosts (no port) use <see cref="DefaultPort"/> instead of 80/443.
     /// </summary>
     public static string Normalize(string? input)
     {
         if (string.IsNullOrWhiteSpace(input))
             throw new ArgumentException(
-                "Remote URL is empty. Example: http://192.168.1.10:17700",
+                $"Remote URL is empty. Example: http://192.168.1.10:{DefaultPort}",
                 nameof(input));
 
         var s = input.Trim().TrimEnd('/');
 
-        // Strip accidental path-only mistakes
         if (s.StartsWith("//", StringComparison.Ordinal))
             s = "http:" + s;
 
@@ -33,22 +37,24 @@ public static class RemoteUrl
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             throw new ArgumentException(
-                $"Invalid remote URL: '{input}'. Use http://IP:17700 (example: http://192.168.1.10:17700)",
+                $"Invalid remote URL: '{input}'. Use http://IP:{DefaultPort} (example: http://192.168.1.10:{DefaultPort})",
                 nameof(input));
         }
 
-        // Default port if user only typed IP without port — MSI service listens on 17700
-        if (!uri.IsDefaultPort)
-            return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/";
-
-        // Host only (http://192.168.1.10) → assume 17700
-        if (uri.IsDefaultPort && (uri.Port == 80 || uri.Port == 443 || uri.Port <= 0))
+        var builder = new UriBuilder(uri)
         {
-            var builder = new UriBuilder(uri) { Port = 17700 };
-            return builder.Uri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/";
-        }
+            Path = string.Empty,
+            Query = string.Empty,
+            Fragment = string.Empty,
+        };
 
-        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/";
+        // Uri defaults http→80 / https→443 when the user omits a port.
+        // This product always serves on 17700 unless the user explicitly chose another non-default port.
+        if (builder.Port is 80 or 443 or <= 0)
+            builder.Port = DefaultPort;
+
+        // Always emit host:port so BaseAddress never silently targets :80
+        return $"{builder.Scheme}://{builder.Host}:{builder.Port}/";
     }
 
     public static bool TryNormalize(string? input, out string normalized, out string? error)
