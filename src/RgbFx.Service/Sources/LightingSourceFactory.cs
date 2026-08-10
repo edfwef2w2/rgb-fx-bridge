@@ -26,6 +26,7 @@ public static class LightingSourceFactory
             "aura-addressable-sim" or "aura-addressable" or "addressable" =>
                 new AuraAddressableSimSource(ledCount: Math.Max(lampOrLedCount, 4)),
             // auto / default: try pipe, fall back to software rainbow so remotes still light up
-            "auto" or _ => new PipeWithSimulatorFallbackSource(lampOrLedCount),
+            _ => new PipeWithSimulatorFallbackSource(lampOrLedCount),
         };
     }
+}
