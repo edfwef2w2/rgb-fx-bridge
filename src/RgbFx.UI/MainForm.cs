@@ -13,7 +13,7 @@ public sealed class MainForm : Form
     private readonly BridgeHost _host = new();
     private readonly ListBox _list = new() { Dock = DockStyle.Fill };
     private readonly TextBox _name = new() { PlaceholderText = "Name" };
-    private readonly TextBox _url = new() { PlaceholderText = $"http://192.168.50.8:{RemoteUrl.DefaultPort}", Width = 320 };
+    private readonly TextBox _url = new() { PlaceholderText = $"http://192.168.x.x:{RemoteUrl.DefaultPort}", Width = 320 };
     private readonly TextBox _token = new() { PlaceholderText = "API token (optional)", Width = 180 };
     private readonly ComboBox _source = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 120 };
     private readonly Label _status = new() { AutoSize = true, Dock = DockStyle.Bottom, Padding = new Padding(8) };
