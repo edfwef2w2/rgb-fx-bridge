@@ -223,7 +223,8 @@ public sealed class MainForm : Form
 
     private void RefreshStatus()
     {
-        _status.Text = $"{_host.Status} | frames={_host.FramesForwarded} | err={_host.LastError ?? "-"} | cfg={BridgeConfig.ConfigPath}";
+        _status.Text =
+            $"{_host.Status} | frames={_host.FramesForwarded} | err={_host.LastError ?? "-"}";
     }
 
     protected override void OnFormClosed(FormClosedEventArgs e)

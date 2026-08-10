@@ -12,14 +12,18 @@ public sealed class HttpApiSink : ILightingSink
     private DateTime _lastSent = DateTime.MinValue;
     private readonly TimeSpan _minInterval;
 
-    public HttpApiSink(MysticLightApiClient client, ZoneMapper mapper, int maxFrameHz = 15, string mode = "Direct")
+    public HttpApiSink(MysticLightApiClient client, ZoneMapper mapper, int maxFrameHz = 15, string mode = "Static")
     {
         _client = client;
         _mapper = mapper;
-        _mode = mode;
+        // Static is the most reliable across MSI 162/185 boards; Direct aliases Static on many boards.
+        _mode = string.IsNullOrWhiteSpace(mode) ? "Static" : mode;
         var hz = Math.Clamp(maxFrameHz, 1, 60);
         _minInterval = TimeSpan.FromMilliseconds(1000.0 / hz);
     }
+
+    /// <summary>Last POST body zone count (for status / debug).</summary>
+    public int LastZoneCount { get; private set; }
 
     public string? LastError { get; private set; }
     public long FramesSent { get; private set; }
@@ -50,8 +54,12 @@ public sealed class HttpApiSink : ILightingSink
             return;
 
         var zones = _mapper.MapFrame(frame);
+        LastZoneCount = zones.Count;
         if (zones.Count == 0)
+        {
+            LastError = "mapper produced 0 zones";
             return;
+        }
 
         try
         {
