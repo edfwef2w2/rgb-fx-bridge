@@ -21,45 +21,95 @@ public sealed class NamedPipeLampSource : ILightingSource
     public async IAsyncEnumerable<LightingFrame> ReadFramesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
+        // Note: C# forbids yield return inside try blocks that have a catch clause.
+        // Connect/read errors are handled without yielding inside those try/catch regions.
         while (!ct.IsCancellationRequested)
         {
             NamedPipeClientStream? pipe = null;
+            var connected = false;
+
             try
             {
                 pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.In, PipeOptions.Asynchronous);
                 await pipe.ConnectAsync(2000, ct).ConfigureAwait(false);
+                connected = true;
+            }
+            catch (OperationCanceledException)
+            {
+                if (pipe != null)
+                    await pipe.DisposeAsync().ConfigureAwait(false);
+                yield break;
+            }
+            catch
+            {
+                if (pipe != null)
+                {
+                    await pipe.DisposeAsync().ConfigureAwait(false);
+                    pipe = null;
+                }
+            }
+
+            if (!connected || pipe is null)
+            {
+                try
+                {
+                    await Task.Delay(2000, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    yield break;
+                }
+
+                continue;
+            }
+
+            // try/finally is allowed with yield; no catch on this block
+            try
+            {
                 var buffer = new byte[256];
                 while (!ct.IsCancellationRequested)
                 {
-                    var n = await pipe.ReadAsync(buffer.AsMemory(0, buffer.Length), ct).ConfigureAwait(false);
-                    if (n <= 0)
+                    int n;
+                    var readFailed = false;
+                    try
+                    {
+                        n = await pipe.ReadAsync(buffer.AsMemory(0, buffer.Length), ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        yield break;
+                    }
+                    catch
+                    {
+                        readFailed = true;
+                        n = 0;
+                    }
+
+                    if (readFailed || n <= 0)
                         break;
-                    if (ReportCodec.TryParseMultiUpdate(buffer.AsSpan(0, n), out var frame) && frame != null)
+
+                    LightingFrame? frame = null;
+                    if (ReportCodec.TryParseMultiUpdate(buffer.AsSpan(0, n), out frame) && frame != null)
+                    {
                         yield return frame;
+                    }
                     else if (ReportCodec.TryParseRangeUpdate(buffer.AsSpan(0, n), out frame) && frame != null)
+                    {
                         yield return frame;
+                    }
                     else if (ReportCodec.TryParseControl(buffer.AsSpan(0, n), out var auto))
+                    {
                         yield return new LightingFrame
                         {
                             Updates = Array.Empty<LampColorUpdate>(),
                             AutonomousMode = auto,
                         };
+                    }
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                yield break;
-            }
-            catch
-            {
-                // Driver not present — wait and retry
-                try { await Task.Delay(2000, ct).ConfigureAwait(false); }
-                catch (OperationCanceledException) { yield break; }
             }
             finally
             {
-                if (pipe != null)
-                    await pipe.DisposeAsync().ConfigureAwait(false);
+                await pipe.DisposeAsync().ConfigureAwait(false);
             }
         }
     }

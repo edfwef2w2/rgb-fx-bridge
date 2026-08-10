@@ -43,8 +43,11 @@ public sealed class SimulatorSource : ILightingSource
             }
             catch (OperationCanceledException)
             {
-                yield break;
+                // fall through; loop condition / final check exits cleanly
             }
+
+            if (ct.IsCancellationRequested)
+                yield break;
         }
     }
 
