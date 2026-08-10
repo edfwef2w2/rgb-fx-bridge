@@ -29,7 +29,6 @@ jobs:
       - name: Test
         run: |
           dotnet test tests/RgbFx.LampArray.Protocol.Tests/RgbFx.LampArray.Protocol.Tests.csproj -c Release --verbosity normal
-          dotnet test tests/RgbFx.AuraAddressable.Protocol.Tests/RgbFx.AuraAddressable.Protocol.Tests.csproj -c Release --verbosity normal
 
       - name: Publish UI
         run: dotnet publish src/RgbFx.UI/RgbFx.UI.csproj -c Release -r win-x64 --self-contained false -o artifacts/ui

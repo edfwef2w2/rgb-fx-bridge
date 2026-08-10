@@ -27,13 +27,12 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
 
-        // Keep every simulation path selectable (Windows LampArray + software + Aura Addressable experimental)
+        // Windows Dynamic Lighting (pipe) + software simulator
         _source.Items.AddRange(new object[]
         {
             "auto",
             "pipe",
             "simulator",
-            "aura-addressable-sim",
         });
         _source.SelectedItem = "auto";
 
