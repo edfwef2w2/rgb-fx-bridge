@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>RgbFx.LampArray.Protocol</RootNamespace>
+    <Description>HID LampArray report structures aligned with Windows Dynamic Lighting / HUT Lighting page</Description>
+  </PropertyGroup>
+</Project>

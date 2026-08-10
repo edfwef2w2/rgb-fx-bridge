@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>RgbFx.Service</RootNamespace>
+    <Description>Forwards Windows LampArray updates to remote MSI Mystic Light /api/v1</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RgbFx.LampArray.Protocol\RgbFx.LampArray.Protocol.csproj" />
+  </ItemGroup>
+</Project>

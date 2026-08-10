@@ -1,0 +1,65 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  managed:
+    name: Build managed (.NET 8)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore src/RgbFxBridge.sln
+
+      - name: Build
+        run: dotnet build src/RgbFxBridge.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/RgbFx.LampArray.Protocol.Tests/RgbFx.LampArray.Protocol.Tests.csproj -c Release --verbosity normal
+
+      - name: Publish UI
+        run: dotnet publish src/RgbFx.UI/RgbFx.UI.csproj -c Release -r win-x64 --self-contained false -o artifacts/ui
+
+      - name: Publish Service
+        run: dotnet publish src/RgbFx.Service/RgbFx.Service.csproj -c Release -r win-x64 --self-contained false -o artifacts/service
+
+      - name: Upload managed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: managed-win-x64
+          path: |
+            artifacts/ui/**
+            artifacts/service/**
+            packaging/**
+            docs/**
+
+  driver-check:
+    name: Driver sources present
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify driver tree
+        shell: pwsh
+        run: |
+          $required = @(
+            "src/RgbFx.Driver/vhf_lamparray.c",
+            "src/RgbFx.Driver/lamp_array_descriptor.h",
+            "src/RgbFx.Driver/RgbFx.Driver.inf",
+            "scripts/build-driver.ps1"
+          )
+          foreach ($f in $required) {
+            if (-not (Test-Path $f)) { throw "Missing $f" }
+            Write-Host "OK $f"
+          }
+          Write-Host "Driver sources verified. Full KMDF build requires WDK (local scripts/build-driver.ps1)."

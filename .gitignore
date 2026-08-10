@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+artifacts/
+*.log
+TestResults/
+[Dd]ebug/
+[Rr]elease/
+*.sys
+*.pdb
+*.cer
+*.pfx

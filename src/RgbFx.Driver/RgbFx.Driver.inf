@@ -1,0 +1,48 @@
+;
+; RgbFx Virtual Chassis LampArray (test-sign)
+;
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = RgbFx.Driver.cat
+DriverVer   = 01/01/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+RgbFx.Driver.sys = 1,,
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%RgbFx.DeviceDesc% = RgbFx_Device, Root\RgbFxLampArray
+
+[RgbFx_Device.NT]
+CopyFiles = Drivers_Dir
+
+[Drivers_Dir]
+RgbFx.Driver.sys
+
+[RgbFx_Device.NT.Services]
+AddService = RgbFxDriver,0x00000002,RgbFx_Service
+
+[RgbFx_Service]
+DisplayName    = %RgbFx.SVCDESC%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
+ServiceBinary  = %13%\RgbFx.Driver.sys
+
+[Strings]
+ManufacturerName = "RgbFx"
+DiskName         = "RgbFx Driver Installation Disk"
+RgbFx.DeviceDesc = "RgbFx Virtual Chassis LampArray"
+RgbFx.SVCDESC    = "RgbFx LampArray Service"
