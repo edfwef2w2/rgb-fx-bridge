@@ -91,23 +91,37 @@ public sealed class BridgeHost
                 hz = Math.Min(hz, caps.Limits.MaxFrameHz);
 
             var sink = new HttpApiSink(client, mapper, hz);
-            // All simulation modes available; factory keeps simulator/pipe and adds aura-addressable-sim
             var source = LightingSourceFactory.Create(Config.SourceMode, device.Lamps.Count);
+            var backend = source is PipeWithSimulatorFallbackSource fb
+                ? $"{Config.SourceMode}/{fb.ActiveBackend}"
+                : Config.SourceMode;
 
-            Status = $"forwarding ({Config.SourceMode}) → {target.Name}";
+            Status = $"forwarding ({backend}) → {target.BaseUrl}";
             StateChanged?.Invoke();
 
+            var first = true;
             await foreach (var frame in source.ReadFramesAsync(ct).ConfigureAwait(false))
             {
+                if (first)
+                {
+                    first = false;
+                    if (source is PipeWithSimulatorFallbackSource fb2)
+                        Status = $"forwarding ({Config.SourceMode}/{fb2.ActiveBackend}) → {target.BaseUrl}";
+                    StateChanged?.Invoke();
+                }
+
                 try
                 {
                     await sink.ApplyAsync(frame, ct).ConfigureAwait(false);
                     FramesForwarded = sink.FramesSent;
                     LastError = sink.LastError;
+                    if (FramesForwarded > 0 && FramesForwarded % 30 == 0)
+                        StateChanged?.Invoke();
                 }
                 catch (Exception ex)
                 {
                     LastError = ex.Message;
+                    Status = $"error → {target.BaseUrl}";
                     StateChanged?.Invoke();
                     await Task.Delay(500, ct).ConfigureAwait(false);
                 }

@@ -21,11 +21,11 @@ public static class LightingSourceFactory
         return mode switch
         {
             "simulator" => new SimulatorSource(lampOrLedCount),
+            // Pure pipe: only works when VHF driver is installed; otherwise no frames
             "pipe" => new NamedPipeLampSource(),
             "aura-addressable-sim" or "aura-addressable" or "addressable" =>
                 new AuraAddressableSimSource(ledCount: Math.Max(lampOrLedCount, 4)),
-            // auto: prefer LampArray pipe; does not force aura mode
-            _ => new CompositeSource(new NamedPipeLampSource(), new SimulatorSource(lampOrLedCount)),
+            // auto / default: try pipe, fall back to software rainbow so remotes still light up
+            "auto" or _ => new PipeWithSimulatorFallbackSource(lampOrLedCount),
         };
     }
-}
