@@ -98,23 +98,12 @@ public sealed class AddressableDevice
     private ApplyResult HandleSetColors(ReadOnlySpan<byte> report)
     {
         // Wiki: EC 36 00 FF 00 | color data...
-        // Color data layout (clean-room practical mapping used by many captures):
-        // optional start index at [5], then RGB triplets. If short, treat [5..] as RGBRGB...
+        // Dense RGB triplets from byte 5 (OpenRGB-style packs after 00 FF 00).
         if (report.Length < 8)
             return ApplyResult.Ok;
 
-        var offset = 5;
-        var startLed = 0;
-        // Heuristic: if byte5 looks like a small LED index and remaining length fits, use it
-        if (report[5] < LedCount && report.Length >= 5 + 1 + 3)
-        {
-            // Prefer direct RGB stream from offset 5 when host packs dense RGB
-            // OpenRGB-style packs often place RGB starting at index 5 after 00 FF 00
-        }
-
         var changed = false;
-        var led = startLed;
-        // Dense RGB from byte 5
+        var led = 0;
         for (var i = 5; i + 2 < report.Length && led < LedCount; i += 3)
         {
             var c = new RgbColor(report[i], report[i + 1], report[i + 2]);
@@ -124,19 +113,6 @@ public sealed class AddressableDevice
                 changed = true;
             }
             led++;
-        }
-
-        // If no RGB triplets fit, try GRB (some addressable strips)
-        if (!changed && report.Length >= 8)
-        {
-            led = 0;
-            for (var i = 5; i + 2 < report.Length && led < LedCount; i += 3)
-            {
-                // interpret as R G B still; alternate path reserved
-                var c = new RgbColor(report[i], report[i + 1], report[i + 2]);
-                _leds[led++] = c;
-                changed = true;
-            }
         }
 
         return changed ? ApplyResult.OkColorsChanged : ApplyResult.Ok;
