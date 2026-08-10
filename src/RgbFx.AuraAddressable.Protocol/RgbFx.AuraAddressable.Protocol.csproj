@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>RgbFx.AuraAddressable.Protocol</RootNamespace>
+    <Description>Clean-room ASUS Aura Addressable / Aura USB HID report handling (device-side). Protocol shapes from public OpenRGB wiki docs — no GPL source copied.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RgbFx.LampArray.Protocol\RgbFx.LampArray.Protocol.csproj" />
+  </ItemGroup>
+</Project>

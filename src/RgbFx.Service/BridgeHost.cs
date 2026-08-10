@@ -91,12 +91,8 @@ public sealed class BridgeHost
                 hz = Math.Min(hz, caps.Limits.MaxFrameHz);
 
             var sink = new HttpApiSink(client, mapper, hz);
-            ILightingSource source = Config.SourceMode.ToLowerInvariant() switch
-            {
-                "simulator" => new SimulatorSource(device.Lamps.Count),
-                "pipe" => new NamedPipeLampSource(),
-                _ => new CompositeSource(new NamedPipeLampSource(), new SimulatorSource(device.Lamps.Count)),
-            };
+            // All simulation modes available; factory keeps simulator/pipe and adds aura-addressable-sim
+            var source = LightingSourceFactory.Create(Config.SourceMode, device.Lamps.Count);
 
             Status = $"forwarding ({Config.SourceMode}) → {target.Name}";
             StateChanged?.Invoke();
@@ -130,33 +126,5 @@ public sealed class BridgeHost
         {
             StateChanged?.Invoke();
         }
-    }
-}
-
-/// <summary>Prefer pipe; if no frames for a while, still leave pipe retrying (pipe source loops).</summary>
-file sealed class CompositeSource : ILightingSource
-{
-    private readonly ILightingSource _primary;
-    private readonly ILightingSource _fallback;
-
-    public CompositeSource(ILightingSource primary, ILightingSource fallback)
-    {
-        _primary = primary;
-        _fallback = fallback;
-    }
-
-    public async IAsyncEnumerable<LightingFrame> ReadFramesAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        // Try primary pipe in background; use simulator only when env RGBFX_FORCE_SIM=1
-        if (string.Equals(Environment.GetEnvironmentVariable("RGBFX_FORCE_SIM"), "1", StringComparison.Ordinal))
-        {
-            await foreach (var f in _fallback.ReadFramesAsync(ct).ConfigureAwait(false))
-                yield return f;
-            yield break;
-        }
-
-        await foreach (var f in _primary.ReadFramesAsync(ct).ConfigureAwait(false))
-            yield return f;
     }
 }

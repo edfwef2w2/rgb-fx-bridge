@@ -11,7 +11,10 @@ UI is intentionally minimal: **choose remote target, probe, start/stop**. Effect
 - VHF KMDF driver skeleton + INF (test-sign install path)
 - Named pipe contract `\\.\pipe\RgbFxLampArray`
 - Simulator mode for end-to-end API validation without WDK
+- **Experimental (branch `feature/aura-addressable-sim`):** Aura Addressable device-side sim (`aura-addressable-sim`) — clean-room HID reports from public OpenRGB wiki; coexists with `simulator` / `pipe`
 - GitHub Actions CI for managed build/test/publish
+
+See [docs/SOURCES.md](docs/SOURCES.md) and [docs/AURA_ADDRESSABLE_SIM.md](docs/AURA_ADDRESSABLE_SIM.md).
 
 ## Quick start (API path)
 
@@ -33,12 +36,13 @@ See [docs/INSTALL_TESTSIGN.md](docs/INSTALL_TESTSIGN.md) and [docs/LAMPARRAY_SPE
 ## Layout
 
 ```
-src/RgbFx.LampArray.Protocol  # HID codec
-src/RgbFx.Service             # host + HTTP sink
-src/RgbFx.UI                  # target picker only
-src/RgbFx.Driver               # VHF skeleton (WDK)
-docs/                          # architecture & install
-.github/workflows/build.yml    # CI
+src/RgbFx.LampArray.Protocol       # Windows LampArray HID codec
+src/RgbFx.AuraAddressable.Protocol # Aura Addressable device-side (experimental)
+src/RgbFx.Service                  # host + HTTP sink + multi Source
+src/RgbFx.UI                       # target picker + SourceMode
+src/RgbFx.Driver                    # VHF skeleton (WDK)
+docs/                               # architecture & install
+.github/workflows/build.yml         # CI
 ```
 
 ## Related

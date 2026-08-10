@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\RgbFx.LampArray.Protocol\RgbFx.LampArray.Protocol.csproj" />
+    <ProjectReference Include="..\RgbFx.AuraAddressable.Protocol\RgbFx.AuraAddressable.Protocol.csproj" />
   </ItemGroup>
 </Project>

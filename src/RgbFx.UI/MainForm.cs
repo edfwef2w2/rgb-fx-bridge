@@ -26,7 +26,14 @@ public sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
 
-        _source.Items.AddRange(new object[] { "auto", "pipe", "simulator" });
+        // Keep every simulation path selectable (Windows LampArray + software + Aura Addressable experimental)
+        _source.Items.AddRange(new object[]
+        {
+            "auto",
+            "pipe",
+            "simulator",
+            "aura-addressable-sim",
+        });
         _source.SelectedItem = "auto";
 
         var top = new FlowLayoutPanel
@@ -52,8 +59,32 @@ public sealed class MainForm : Form
         Controls.Add(_status);
         Controls.Add(top);
 
-        _host.StateChanged += () => BeginInvoke(RefreshStatus);
+        // Do not BeginInvoke until the form handle exists (ctor/LoadConfig used to crash UI instantly).
+        _host.StateChanged += OnHostStateChanged;
         LoadConfigToUi();
+        RefreshStatus();
+    }
+
+    private void OnHostStateChanged()
+    {
+        if (IsDisposed)
+            return;
+
+        if (InvokeRequired)
+        {
+            if (!IsHandleCreated)
+                return;
+            try
+            {
+                BeginInvoke(OnHostStateChanged);
+            }
+            catch (InvalidOperationException)
+            {
+                // Handle destroyed between check and marshal.
+            }
+            return;
+        }
+
         RefreshStatus();
     }
 
@@ -76,6 +107,7 @@ public sealed class MainForm : Form
         _forward.Checked = cfg.ForwardingEnabled;
         if (!string.IsNullOrEmpty(cfg.SourceMode) && _source.Items.Contains(cfg.SourceMode))
             _source.SelectedItem = cfg.SourceMode;
+        // Reload host config without relying on UI marshaling during construction.
         _host.ReloadConfig();
     }
 
