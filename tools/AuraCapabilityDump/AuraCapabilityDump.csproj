@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>AuraCapabilityDump</AssemblyName>
+    <!-- LightingService is 32-bit — in-proc COM host must match -->
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="MbEnumDump.cs" />
+    <Compile Include="NativeStyleEnum.cs" />
+    <Compile Include="AssemblyInfo.cs" />
+    <Compile Include="..\..\src\RgbFx.AacHal\AacCom.cs" Link="Aac\AacCom.cs" />
+    <Compile Include="..\..\src\RgbFx.AacHal\CapabilityBuilder.cs" Link="Aac\CapabilityBuilder.cs" />
+    <Compile Include="..\..\src\RgbFx.AacHal\MsiFrameSink.cs" Link="Aac\MsiFrameSink.cs" />
+    <Compile Include="..\..\src\RgbFx.AacHal\RgbFxLedDevice.cs" Link="Aac\RgbFxLedDevice.cs" />
+    <Compile Include="..\..\src\RgbFx.AacHal\RgbFxAacHal.cs" Link="Aac\RgbFxAacHal.cs" />
+  </ItemGroup>
+</Project>

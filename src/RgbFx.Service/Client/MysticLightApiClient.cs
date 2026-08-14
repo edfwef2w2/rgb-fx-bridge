@@ -72,9 +72,14 @@ public sealed class HealthResponse
 {
     public bool Ok { get; set; }
     public bool Connected { get; set; }
+    [JsonPropertyName("board_id")]
     public string? BoardId { get; set; }
+    [JsonPropertyName("hostname")]
+    public string? HostName { get; set; }
+    [JsonPropertyName("uptime_sec")]
     public double UptimeSec { get; set; }
     public string? Error { get; set; }
+    [JsonPropertyName("api_version")]
     public string? ApiVersion { get; set; }
 }
 

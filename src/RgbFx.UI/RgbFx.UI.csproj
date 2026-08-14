@@ -12,4 +12,14 @@
   <ItemGroup>
     <ProjectReference Include="..\RgbFx.Service\RgbFx.Service.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="I18n\en.json" CopyToOutputDirectory="PreserveNewest" Link="I18n\en.json" />
+    <None Include="I18n\zh-CN.json" CopyToOutputDirectory="PreserveNewest" Link="I18n\zh-CN.json" />
+  </ItemGroup>
+  <Target Name="PublishHalHost" AfterTargets="Publish" Condition="'$(PublishHalHost)' != 'false'">
+    <MSBuild
+      Projects="..\..\tools\AuraCapabilityDump\AuraCapabilityDump.csproj"
+      Targets="Publish"
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=win-x86;SelfContained=true;PublishDir=$(PublishDir)hal\" />
+  </Target>
 </Project>

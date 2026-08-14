@@ -1,4 +1,10 @@
 using RgbFx.UI;
+using RgbFx.UI.Aura;
+
+if (args.Any(a => string.Equals(a, "--hal-add", StringComparison.OrdinalIgnoreCase)))
+    Environment.Exit(AuraHalOps.Add());
+if (args.Any(a => string.Equals(a, "--hal-remove", StringComparison.OrdinalIgnoreCase)))
+    Environment.Exit(AuraHalOps.Remove());
 
 ApplicationConfiguration.Initialize();
 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);

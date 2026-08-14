@@ -1,23 +1,22 @@
 # Architecture
 
 ```
-Windows 11 Dynamic Lighting / Apps (LampArray API)
-        │
-        ▼
-RgbFx.Driver (KMDF + VHF)  — virtual Chassis HID LampArray
-        │  raw reports
-        ▼
-\\.\pipe\RgbFxLampArray
-        │
-        ▼
-RgbFx.Service  — parse reports (Protocol) → map lamps → zones
-        │
-        ▼
-POST http://<msi-host>:17700/api/v1/frame
-        │
-        ▼
-msi-mystic-light-web → MSI Mystic Light HID
+Windows Dynamic Lighting (pipe / simulator)     Armoury Crate (AAC HAL LocalServer)
+                    \                                   /
+                     \                                 /
+                      ▼                               ▼
+                 RgbFx.UI  (one mode visible at a time; Debug below)
+                      │
+                      ▼
+                 RgbFx.Service  →  POST /api/v1/frame
+                      │
+                      ▼
+              msi-mystic-light-web
 ```
+
+UI modes are exclusive on screen (`dynamic` | `aura`). HAL may still run as a COM LocalServer.
+
+Strings live in `src/RgbFx.UI/I18n/*.json` (keys only in C#).
 
 ## Components
 
@@ -25,7 +24,8 @@ msi-mystic-light-web → MSI Mystic Light HID
 |---------|------|
 | `RgbFx.LampArray.Protocol` | HID usages, report codec, descriptor bytes, models |
 | `RgbFx.Service` | Config, HTTP client, zone mapper, sources (pipe/sim), sink |
-| `RgbFx.UI` | **Only** remote target management + start/stop |
+| `RgbFx.UI` | Mode switch, MSI target, Aura install/uninstall, Debug |
+| `RgbFx.AacHal` | Aura COM HAL → `/api/v1/frame` (URL from `msi-url.txt`) |
 | `RgbFx.Driver` | VHF virtual device (WDK); skeleton → full bring-up |
 
 ## Source modes

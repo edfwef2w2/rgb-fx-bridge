@@ -1,11 +1,24 @@
 using RgbFx.Service;
 using RgbFx.Service.Config;
+using RgbFx.Service.Discovery;
 
-// Headless service entry: rgb-fx-service.exe [--start] [--simulator]
+// Headless service entry: rgb-fx-service.exe [--start] [--simulator] [--scan]
 // UI process uses BridgeHost directly; this EXE is for scheduled/background use.
 
 Console.WriteLine("RgbFx Bridge Service");
 Console.WriteLine("Config: " + BridgeConfig.ConfigPath);
+
+if (args.Contains("--scan", StringComparer.OrdinalIgnoreCase))
+{
+    var extra = BridgeConfig.Load().Targets.Select(t => t.BaseUrl);
+    Console.WriteLine("Scanning LAN for msi-mystic-light-web on :17700 …");
+    var list = await LanScanner.ScanAsync(extra);
+    if (list.Count == 0)
+        Console.WriteLine("No hosts found.");
+    foreach (var d in list)
+        Console.WriteLine($"{(d.Connected ? "online " : "offline")} {d.DisplayName}  {d.BaseUrl}  api={d.ApiVersion ?? "-"}");
+    return;
+}
 
 var cfg = BridgeConfig.Load();
 if (args.Contains("--simulator", StringComparer.OrdinalIgnoreCase))
@@ -31,5 +44,5 @@ if (args.Contains("--start", StringComparer.OrdinalIgnoreCase) || cfg.Forwarding
 else
 {
     Console.WriteLine("Forwarding disabled. Configure targets with RgbFx.UI or set ForwardingEnabled=true.");
-    Console.WriteLine("Usage: RgbFx.Service --start [--simulator]");
+    Console.WriteLine("Usage: RgbFx.Service --start [--simulator] | --scan");
 }

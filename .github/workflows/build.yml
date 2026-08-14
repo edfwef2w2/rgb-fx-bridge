@@ -2,7 +2,6 @@ name: build
 
 on:
   push:
-    # Run CI on main and feature work without requiring merge
     branches: [main, master, "feature/**"]
   pull_request:
     branches: [main, master]
@@ -30,21 +29,49 @@ jobs:
         run: |
           dotnet test tests/RgbFx.LampArray.Protocol.Tests/RgbFx.LampArray.Protocol.Tests.csproj -c Release --verbosity normal
 
+      - name: Publish HAL (win-x86 self-contained)
+        run: >
+          dotnet publish tools/AuraCapabilityDump/AuraCapabilityDump.csproj
+          -c Release -r win-x86 --self-contained true
+          -o artifacts/package/hal
+
       - name: Publish UI
-        run: dotnet publish src/RgbFx.UI/RgbFx.UI.csproj -c Release -r win-x64 --self-contained false -o artifacts/ui
+        run: >
+          dotnet publish src/RgbFx.UI/RgbFx.UI.csproj
+          -c Release -r win-x64 --self-contained false
+          -o artifacts/package/app
+          /p:PublishHalHost=false
 
-      - name: Publish Service
-        run: dotnet publish src/RgbFx.Service/RgbFx.Service.csproj -c Release -r win-x64 --self-contained false -o artifacts/service
+      - name: Publish Setup
+        run: >
+          dotnet publish src/RgbFx.Setup/RgbFx.Setup.csproj
+          -c Release -r win-x64 --self-contained false
+          -o artifacts/package
 
-      - name: Upload managed artifacts
+      - name: Stage portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/portable | Out-Null
+          Copy-Item -Recurse artifacts/package/app artifacts/portable/app
+          Copy-Item -Recurse artifacts/package/hal artifacts/portable/hal
+          Compress-Archive -Path artifacts/portable/app, artifacts/portable/hal -DestinationPath artifacts/RgbFxBridge-portable-win-x64.zip -Force
+
+      - name: Stage setup zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifacts/package/RgbFx.Setup.exe, artifacts/package/app, artifacts/package/hal -DestinationPath artifacts/RgbFxBridge-setup-win-x64.zip -Force
+
+      - name: Upload portable files
         uses: actions/upload-artifact@v4
         with:
-          name: managed-win-x64
-          path: |
-            artifacts/ui/**
-            artifacts/service/**
-            packaging/**
-            docs/**
+          name: RgbFxBridge-portable-win-x64
+          path: artifacts/RgbFxBridge-portable-win-x64.zip
+
+      - name: Upload setup package
+        uses: actions/upload-artifact@v4
+        with:
+          name: RgbFxBridge-setup-win-x64
+          path: artifacts/RgbFxBridge-setup-win-x64.zip
 
   driver-check:
     name: Driver sources present

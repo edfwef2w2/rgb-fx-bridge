@@ -40,11 +40,18 @@ Windows: **Settings → Personalization → Dynamic lighting**.
 ```
 src/RgbFx.LampArray.Protocol  # Windows LampArray HID codec
 src/RgbFx.Service             # host + HTTP sink + multi Source
-src/RgbFx.UI                  # target picker + SourceMode
-src/RgbFx.Driver               # VHF skeleton (WDK)
-docs/                          # architecture & install
-.github/workflows/build.yml    # CI
+src/RgbFx.UI                  # target picker, Aura HAL add/remove (C#)
+src/RgbFx.Setup               # Program Files copier (admin)
+src/RgbFx.AacHal              # AAC HAL sources
+src/RgbFx.Driver              # VHF skeleton (WDK)
+docs/                         # architecture
+.github/workflows/build.yml   # CI → portable zip + setup zip
 ```
+
+CI artifacts:
+
+- `RgbFxBridge-portable-win-x64.zip` — unzip and run `app\RgbFx.UI.exe`
+- `RgbFxBridge-setup-win-x64.zip` — run `RgbFx.Setup.exe` (Program Files, Start Menu, Settings uninstall)
 
 ## Related
 
