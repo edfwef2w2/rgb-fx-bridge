@@ -48,30 +48,27 @@ jobs:
           -c Release -r win-x64 --self-contained false
           -o artifacts/package
 
-      - name: Stage portable zip
+      - name: Stage portable layout
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/portable | Out-Null
           Copy-Item -Recurse artifacts/package/app artifacts/portable/app
           Copy-Item -Recurse artifacts/package/hal artifacts/portable/hal
-          Compress-Archive -Path artifacts/portable/app, artifacts/portable/hal -DestinationPath artifacts/RgbFxBridge-portable-win-x64.zip -Force
-
-      - name: Stage setup zip
-        shell: pwsh
-        run: |
-          Compress-Archive -Path artifacts/package/RgbFx.Setup.exe, artifacts/package/app, artifacts/package/hal -DestinationPath artifacts/RgbFxBridge-setup-win-x64.zip -Force
 
       - name: Upload portable files
         uses: actions/upload-artifact@v4
         with:
           name: RgbFxBridge-portable-win-x64
-          path: artifacts/RgbFxBridge-portable-win-x64.zip
+          path: artifacts/portable/**
 
       - name: Upload setup package
         uses: actions/upload-artifact@v4
         with:
           name: RgbFxBridge-setup-win-x64
-          path: artifacts/RgbFxBridge-setup-win-x64.zip
+          path: |
+            artifacts/package/RgbFx.Setup.exe
+            artifacts/package/app
+            artifacts/package/hal
 
   driver-check:
     name: Driver sources present

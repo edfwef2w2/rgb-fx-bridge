@@ -1,8 +1,8 @@
 # rgb-fx-bridge
 
-Windows bridge that presents a **virtual HID LampArray** (Microsoft **Dynamic Lighting** path) and forwards colors to a remote [msi-mystic-light-web](https://github.com/edfwef2w2/msi-mystic-light-web) host via stable **`/api/v1/frame`**.
+Windows bridge that presents a **virtual HID LampArray** (Microsoft **Dynamic Lighting** path) and an **Aura Creator / Armoury Crate** AAC HAL, then forwards colors to a remote [msi-mystic-light-web](https://github.com/edfwef2w2/msi-mystic-light-web) host via stable **`/api/v1/frame`**.
 
-UI is intentionally minimal: **choose remote target, probe, start/stop**. Effects come from Windows Dynamic Lighting (or a software simulator for testing).
+UI is intentionally minimal: **choose remote target, probe, start/stop**. Effects come from Windows Dynamic Lighting, **Aura Creator / Armoury Crate** (after installing the HAL from the UI), or a software simulator for testing.
 
 ## Features
 
@@ -12,6 +12,7 @@ UI is intentionally minimal: **choose remote target, probe, start/stop**. Effect
 - Named pipe contract `\\.\pipe\RgbFxLampArray`
 - Simulator mode for end-to-end API validation without WDK
 - Auto fallback: pipe → simulator when the LampArray driver is not present
+- Aura Creator / Armoury Crate: register a COM AAC HAL so Aura Sync can drive the same MSI `/api/v1/frame` target
 - GitHub Actions CI for managed build/test/publish
 
 See [docs/SOURCES.md](docs/SOURCES.md).
@@ -45,13 +46,15 @@ src/RgbFx.Setup               # Program Files copier (admin)
 src/RgbFx.AacHal              # AAC HAL sources
 src/RgbFx.Driver              # VHF skeleton (WDK)
 docs/                         # architecture
-.github/workflows/build.yml   # CI → portable zip + setup zip
+.github/workflows/build.yml   # CI → portable + setup artifacts
 ```
 
-CI artifacts:
+CI artifacts (download unzip once; contents are the files, not a nested zip):
 
-- `RgbFxBridge-portable-win-x64.zip` — unzip and run `app\RgbFx.UI.exe`
-- `RgbFxBridge-setup-win-x64.zip` — run `RgbFx.Setup.exe` (Program Files, Start Menu, Settings uninstall)
+- `RgbFxBridge-portable-win-x64` — run `app\RgbFx.UI.exe`
+- `RgbFxBridge-setup-win-x64` — run `RgbFx.Setup.exe` (Program Files, Start Menu, Settings uninstall)
+
+Aura Creator / Armoury Crate: in the UI switch to Armoury mode, set the MSI target, then **Install** the HAL (admin). Aura Sync can then send frames to the same remote host. See [docs/AURA_HAL_RE.md](docs/AURA_HAL_RE.md).
 
 ## Related
 
