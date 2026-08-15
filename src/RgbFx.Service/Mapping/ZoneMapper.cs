@@ -4,46 +4,79 @@ using RgbFx.Service.Client;
 namespace RgbFx.Service.Mapping;
 
 /// <summary>
-/// Maps simulator lamp indices to MSI board zone names 1:1 by order from GET /api/v1/zones.
-/// Always fills every board zone so the web UI does not look like "only one device moves".
+/// Lamps in order form one framebuffer. Async zones get the clipped leds[];
+/// 12V / onboard zones get a single color.
 /// </summary>
 public sealed class ZoneMapper
 {
-    private readonly IReadOnlyList<string> _zones;
+    private readonly IReadOnlyList<ZoneInfo> _zones;
+    private readonly int _hwLeds;
 
     public ZoneMapper(IEnumerable<string> zoneNames, LampArrayDeviceDescription? device = null)
+        : this(zoneNames.Select(n => new ZoneInfo
+        {
+            Name = n,
+            Async = n.Contains("RAINBOW", StringComparison.OrdinalIgnoreCase),
+        }), hwLeds: 72, device)
     {
-        _ = device; // naming comes from the board list only
-        _zones = zoneNames
-            .Where(z => !string.IsNullOrWhiteSpace(z))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (_zones.Count == 0)
-            _zones = new[] { "JRGB1", "JRAINBOW1", "ONBOARD" };
     }
 
-    public IReadOnlyList<string> ZoneNames => _zones;
+    public ZoneMapper(IEnumerable<ZoneInfo> zones, int hwLeds = 72, LampArrayDeviceDescription? device = null)
+    {
+        _ = device;
+        _hwLeds = Math.Clamp(hwLeds, 1, 500);
+        _zones = zones
+            .Where(z => !string.IsNullOrWhiteSpace(z.Name))
+            .GroupBy(z => z.Name!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+        if (_zones.Count == 0)
+            _zones = new[]
+            {
+                new ZoneInfo { Name = "JRGB1" },
+                new ZoneInfo { Name = "JRAINBOW1", Async = true },
+                new ZoneInfo { Name = "ONBOARD" },
+            };
+    }
+
+    public IReadOnlyList<string> ZoneNames => _zones.Select(z => z.Name!).ToList();
 
     public IReadOnlyDictionary<string, ZoneColorSpec> MapFrame(LightingFrame frame)
     {
         var result = new Dictionary<string, ZoneColorSpec>(StringComparer.OrdinalIgnoreCase);
-        var orderedColors = frame.Updates
+        var pixels = frame.Updates
             .OrderBy(u => u.LampId)
-            .Select(u => u.Color)
+            .Select(u => u.Color.ToHex())
             .ToList();
+        if (pixels.Count == 0)
+            pixels.Add("FFFFFF");
 
-        if (orderedColors.Count == 0)
-            orderedColors.Add(new RgbColor(255, 255, 255));
+        var clipped = FrameClip.Even(pixels, _hwLeds);
+        var first = clipped[0];
 
         for (var i = 0; i < _zones.Count; i++)
         {
-            var c = orderedColors[i % orderedColors.Count];
-            var brightness = (int)Math.Round(c.Intensity / 255.0 * 100.0);
-            result[_zones[i]] = new ZoneColorSpec
+            var z = _zones[i];
+            var name = z.Name!;
+            if (z.Async)
             {
-                Color = c.ToHex(),
-                Brightness = Math.Clamp(brightness, 1, 100),
-            };
+                result[name] = new ZoneColorSpec
+                {
+                    Color = first,
+                    Brightness = 100,
+                    LedCount = _hwLeds,
+                    Leds = clipped,
+                };
+            }
+            else
+            {
+                var color = pixels.Count == _zones.Count ? pixels[i] : first;
+                result[name] = new ZoneColorSpec
+                {
+                    Color = color,
+                    Brightness = 100,
+                };
+            }
         }
 
         return result;

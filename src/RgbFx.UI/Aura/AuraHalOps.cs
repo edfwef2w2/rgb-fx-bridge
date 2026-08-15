@@ -1,7 +1,4 @@
-using System.Diagnostics;
 using System.Text;
-using System.Text.RegularExpressions;
-using Microsoft.Win32;
 
 namespace RgbFx.UI.Aura;
 
@@ -10,16 +7,8 @@ public static class AuraHalOps
 {
     public const string Clsid = "{B7E8C2A1-4F3D-4E9A-9C1B-8D2E6F0A5B73}";
     public const string ClsidBare = "B7E8C2A1-4F3D-4E9A-9C1B-8D2E6F0A5B73";
-    const string CategoryRoot = "{9C9E903E-BBC7-4A0E-8326-ED6AC85B9FCC}";
-    const string CategoryInst = "{E9BBD754-6CF4-492E-BA89-782177A2771B}";
-    const string ProgId = "RgbFx.AacHal.1";
-    const string ProgIdVi = "RgbFx.AacHal";
-    const string TypeLib = "{57E4E792-2CF6-48E5-BF2B-10F19F857B9E}";
-    const string DeviceType = "Extension Card";
 
-    static readonly string DataDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-        "RgbFx", "AacHal");
+    static readonly string DataDir = AuraHalStatus.DataDir;
 
     public static string LogPath => Path.Combine(DataDir, "setup.log");
 
@@ -37,23 +26,42 @@ public static class AuraHalOps
                 return 2;
             }
 
-            var display = ReadDisplayName();
+            var display = FetchLivePrefix(log);
+            if (string.IsNullOrWhiteSpace(display))
+                display = ReadDisplayName();
+            if (string.IsNullOrWhiteSpace(display))
+            {
+                log.AppendLine("no server hostname/board_id — abort (will not use this PC name)");
+                WriteLog(log);
+                return 3;
+            }
+
             File.WriteAllText(Path.Combine(DataDir, "display-name.txt"), display);
-            File.WriteAllText(Path.Combine(DataDir, "type.txt"), "983040");
+            File.WriteAllText(Path.Combine(DataDir, "type.txt"), AuraPersona.CapabilityTypeDecimal);
+            try
+            {
+                // Leftover Machine env from strip/extcard tests overrides Keyboard after reboot.
+                Environment.SetEnvironmentVariable("RGBFX_AAC_TYPE", AuraPersona.CapabilityTypeDecimal,
+                    EnvironmentVariableTarget.Machine);
+            }
+            catch { /* type.txt still wins in ResolveType */ }
             log.AppendLine("DisplayName=" + display);
+            log.AppendLine("persona type=" + AuraPersona.CapabilityTypeDecimal +
+                           " category=" + AuraPersona.CategoryKind);
             log.AppendLine("HAL=" + exe);
 
-            var localServer = "\"" + exe + "\" --server";
-            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
-                WriteClsidAndCategory(view, localServer, display, log);
+            AuraRegistry.Write("\"" + exe + "\" --server", display, log);
 
-            WriteProgId(RegistryView.Registry64, log);
-            WriteProgId(RegistryView.Registry32, log);
-            UpsertDeviceInfo(display, log);
+            var official = AuraMbHeaders.Detect(log);
+            AuraDeviceInfo.RestoreOfficialGroup(official, log);
+            var rlsCount = AuraPersona.SingleDevice ? 1 : ReadZoneCount();
+            AuraDeviceInfo.UpsertIndependentSection(display, rlsCount, log);
 
-            StopProcess("AuraCapabilityDump");
-            BounceAuraStack(log);
-            log.AppendLine("add ok");
+            AuraStackBounce.StopProcess("AuraCapabilityDump");
+            AuraStackBounce.Run(log);
+            log.AppendLine("add ok officialHeaders=" + official +
+                           " rls=" + AuraPersona.RlsDeviceType +
+                           " cap=" + AuraPersona.CapabilityTypeDecimal);
             WriteLog(log);
             return 0;
         }
@@ -71,16 +79,20 @@ public static class AuraHalOps
         var log = new StringBuilder();
         try
         {
-            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
-                DeleteClsidAndCategory(view, log);
+            AuraRegistry.Delete(log);
+            try
+            {
+                Environment.SetEnvironmentVariable("RGBFX_AAC_TYPE", null, EnvironmentVariableTarget.Machine);
+            }
+            catch { /* ignore */ }
+            var official = AuraMbHeaders.Detect(log);
+            if (official == 0)
+                official = AuraMbHeaders.ReadPersisted();
+            AuraDeviceInfo.RestoreOfficialGroup(official, log);
 
-            DeleteProgId(RegistryView.Registry64, log);
-            DeleteProgId(RegistryView.Registry32, log);
-            StripDeviceInfo(log);
-
-            StopProcess("AuraCapabilityDump");
-            BounceAuraStack(log);
-            log.AppendLine("remove ok");
+            AuraStackBounce.StopProcess("AuraCapabilityDump");
+            AuraStackBounce.Run(log);
+            log.AppendLine("remove ok official=" + official);
             WriteLog(log);
             return 0;
         }
@@ -108,7 +120,7 @@ public static class AuraHalOps
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
         {
-            foreach (var leaf in new[] { "aachal-x86-v9", "aachal-x86-v8", "aachal-x86" })
+            foreach (var leaf in DiscoverHalLeaves(dir.FullName))
             {
                 var p = Path.Combine(dir.FullName, "artifacts", leaf, "AuraCapabilityDump.exe");
                 if (File.Exists(p))
@@ -117,6 +129,28 @@ public static class AuraHalOps
         }
 
         return null;
+    }
+
+    static IEnumerable<string> DiscoverHalLeaves(string root)
+    {
+        var art = Path.Combine(root, "artifacts");
+        if (Directory.Exists(art))
+        {
+            foreach (var d in Directory.GetDirectories(art, "aachal-x86-v*")
+                         .Select(p => (path: p, n: ParseHalVer(Path.GetFileName(p))))
+                         .OrderByDescending(x => x.n))
+                yield return Path.GetFileName(d.path)!;
+        }
+
+        yield return "aachal-x86";
+    }
+
+    static int ParseHalVer(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return 0;
+        var i = name.LastIndexOf('v');
+        return i >= 0 && int.TryParse(name[(i + 1)..], out var n) ? n : 0;
     }
 
     static string ReadDisplayName()
@@ -132,247 +166,69 @@ public static class AuraHalOps
             }
         }
         catch { /* ignore */ }
-        return AuraHalStatus.SanitizeHostName(Environment.MachineName);
+        return "";
     }
 
-    static void WriteClsidAndCategory(RegistryView view, string localServer, string display, StringBuilder log)
+    static string FetchLivePrefix(StringBuilder log)
     {
-        using var hk = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-        var clsidRoot = @"SOFTWARE\Classes\CLSID\" + Clsid;
-        using (var k = hk.CreateSubKey(clsidRoot, true))
-        {
-            k.SetValue(null, "RgbFx AAC HAL");
-            using (var ls = k.CreateSubKey("LocalServer32", true))
-                ls.SetValue(null, localServer);
-            using (var p = k.CreateSubKey("ProgID", true))
-                p.SetValue(null, ProgId);
-            using (var p = k.CreateSubKey("VersionIndependentProgID", true))
-                p.SetValue(null, ProgIdVi);
-            using (var t = k.CreateSubKey("TypeLib", true))
-                t.SetValue(null, TypeLib);
-            using (var v = k.CreateSubKey("Version", true))
-                v.SetValue(null, "1.0");
-        }
-        log.AppendLine("CLSID " + view + " " + clsidRoot);
-
-        var inst = $@"SOFTWARE\Classes\CLSID\{CategoryRoot}\Instance\{CategoryInst}\Instance\{Clsid}";
-        using (var k = hk.CreateSubKey(inst, true))
-        {
-            k.SetValue("Name", display);
-            k.SetValue("Description", "RgbFx lighting bridge");
-            k.SetValue("Manufacturer", "ASUSTeK COMPUTER INC.");
-            k.SetValue("DeviceModel", display);
-            k.SetValue("DeviceType", DeviceType);
-            k.SetValue("Version", "0.1.0");
-            k.SetValue("SpecVersion", "1.0.0");
-            k.SetValue("Pluging", 1, RegistryValueKind.DWord);
-        }
-        log.AppendLine("Category " + view);
-    }
-
-    static void DeleteClsidAndCategory(RegistryView view, StringBuilder log)
-    {
-        using var hk = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-        TryDelete(hk, @"SOFTWARE\Classes\CLSID\" + Clsid, log);
-        TryDelete(hk,
-            $@"SOFTWARE\Classes\CLSID\{CategoryRoot}\Instance\{CategoryInst}\Instance\{Clsid}",
-            log);
-    }
-
-    static void WriteProgId(RegistryView view, StringBuilder log)
-    {
-        using var hk = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-        using (var k = hk.CreateSubKey(@"SOFTWARE\Classes\" + ProgId, true))
-        {
-            k.SetValue(null, "RgbFx AAC HAL");
-            using var c = k.CreateSubKey("CLSID", true);
-            c.SetValue(null, Clsid);
-        }
-        using (var k = hk.CreateSubKey(@"SOFTWARE\Classes\" + ProgIdVi, true))
-        {
-            k.SetValue(null, "RgbFx AAC HAL");
-            using (var c = k.CreateSubKey("CLSID", true))
-                c.SetValue(null, Clsid);
-            using var v = k.CreateSubKey("CurVer", true);
-            v.SetValue(null, ProgId);
-        }
-        log.AppendLine("ProgId " + view);
-    }
-
-    static void DeleteProgId(RegistryView view, StringBuilder log)
-    {
-        using var hk = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
-        TryDelete(hk, @"SOFTWARE\Classes\" + ProgId, log);
-        TryDelete(hk, @"SOFTWARE\Classes\" + ProgIdVi, log);
-    }
-
-    static void TryDelete(RegistryKey hk, string path, StringBuilder log)
-    {
+        var url = AuraHalStatus.UrlFilePath;
+        string? root = null;
         try
         {
-            hk.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
-            log.AppendLine("removed " + path);
+            if (File.Exists(url))
+                root = File.ReadAllText(url).Trim().TrimEnd('/');
+        }
+        catch { /* ignore */ }
+
+        if (string.IsNullOrWhiteSpace(root))
+            return "";
+        if (!root.Contains("://", StringComparison.Ordinal))
+            root = "http://" + root;
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            string? host = null, board = null;
+            foreach (var path in new[] { "/api/v1/zones", "/api/v1/health", "/api/v1/board" })
+            {
+                using var res = http.GetAsync(root + path).GetAwaiter().GetResult();
+                var body = res.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                using var doc = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+                var el = doc.RootElement;
+                if (host is null && el.TryGetProperty("hostname", out var h) &&
+                    h.ValueKind == System.Text.Json.JsonValueKind.String)
+                    host = h.GetString();
+                if (board is null && el.TryGetProperty("board_id", out var b) &&
+                    b.ValueKind == System.Text.Json.JsonValueKind.String)
+                    board = b.GetString();
+                if (!string.IsNullOrWhiteSpace(host) && !string.IsNullOrWhiteSpace(board))
+                    break;
+            }
+
+            var prefix = RgbFx.Service.Client.DeviceIdentity.ComposePrefix(host, board);
+            log.AppendLine("live hostname=" + (host ?? "") + " board_id=" + (board ?? "") + " prefix=" + prefix);
+            return prefix == "device" ? "" : prefix;
         }
         catch (Exception ex)
         {
-            log.AppendLine("skip " + path + " " + ex.Message);
+            log.AppendLine("live identity failed " + ex.Message);
+            return "";
         }
     }
 
-    static void UpsertDeviceInfo(string display, StringBuilder log)
-    {
-        var section = BuildIniSection(display);
-        foreach (var ini in DeviceInfoPaths())
-        {
-            if (!File.Exists(ini))
-                continue;
-            try
-            {
-                var (text, enc) = ReadIni(ini);
-                var stripped = StripClsidSection(text);
-                File.WriteAllText(ini, stripped.TrimEnd() + section, enc);
-                log.AppendLine("deviceinfo " + display + " -> " + ini);
-            }
-            catch (Exception ex)
-            {
-                log.AppendLine("skip deviceinfo " + ini + " " + ex.Message);
-            }
-        }
-    }
-
-    static void StripDeviceInfo(StringBuilder log)
-    {
-        foreach (var ini in DeviceInfoPaths())
-        {
-            if (!File.Exists(ini))
-                continue;
-            try
-            {
-                var (text, enc) = ReadIni(ini);
-                var next = StripClsidSection(text);
-                if (next != text)
-                {
-                    File.WriteAllText(ini, next, enc);
-                    log.AppendLine("stripped " + ini);
-                }
-            }
-            catch (Exception ex)
-            {
-                log.AppendLine("skip deviceinfo " + ini + " " + ex.Message);
-            }
-        }
-    }
-
-    static string BuildIniSection(string display) => $@"
-
-[{display}]
-Name={display}
-DisplayName={display}
-DeviceType=Extension_Card
-PrimitiveDeviceType=Extension_Card
-LStype=Extension_Card
-DeviceCount=1
-LightingMode=SUPPORTAURA
-PID=none
-PIDMode=none
-Mode=none
-GUID={ClsidBare}
-ErrorCode=0
-SyncStatus=true
-NeedRestart=false
-Plugin=1
-Firmware_Count=0
-HAL_Count=1
-HAL_regkey_1={ClsidBare}
-HAL_regkeyname_1=Version
-Parameters_Count=0
-HTML_Count=0
-SDK_Count=0
-FirmwareFlow=0
-SupportMatrix=0
-MatrixUpdateStatus=0
-DependentJsonVersion=0
-StageRollOutSkipDownload=0
-";
-
-    static string StripClsidSection(string raw)
-        => Regex.Replace(raw, @"(?ms)^\[.*?\](?:(?!^\[).)*?" + Regex.Escape(ClsidBare) + @"(?:(?!^\[).)*", "");
-
-    static IEnumerable<string> DeviceInfoPaths()
-    {
-        yield return @"C:\ProgramData\ASUS\ROG Live Service\deviceinfo.ini";
-        yield return @"C:\ProgramData\ASUS\ARMOURY CRATE Diagnosis\ROG Live Service\deviceinfo.ini";
-    }
-
-    static (string text, Encoding enc) ReadIni(string path)
-    {
-        var bytes = File.ReadAllBytes(path);
-        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-            return (Encoding.Unicode.GetString(bytes), Encoding.Unicode);
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            return (Encoding.UTF8.GetString(bytes), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        return (Encoding.UTF8.GetString(bytes), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-    }
-
-    /// <summary>Restart lighting backends and close Armoury UI. Does not reopen the UI. Does not touch ROG Live Service.</summary>
-    static void BounceAuraStack(StringBuilder log)
-    {
-        foreach (var name in new[] { "ArmouryCrate", "ArmouryCrate.UserSessionHelper", "ArmouryCrate.Service" })
-            StopProcess(name);
-
-        BounceService("LightingService", log);
-        BounceService("ArmouryCrateService", log);
-        log.AppendLine("Armoury UI closed; backends bounced (UI not relaunched)");
-    }
-
-    static void BounceService(string name, StringBuilder log)
-    {
-        RunSc("stop", name);
-        Thread.Sleep(800);
-        var code = RunSc("start", name);
-        log.AppendLine(name + (code == 0 ? " started" : " start skipped/" + code));
-    }
-
-    static int RunSc(string verb, string name)
+    static int ReadZoneCount()
     {
         try
         {
-            using var p = Process.Start(new ProcessStartInfo
-            {
-                FileName = "sc.exe",
-                Arguments = verb + " \"" + name + "\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            });
-            if (p is null)
-                return -1;
-            p.WaitForExit(15000);
-            return p.ExitCode;
-        }
-        catch
-        {
-            return -1;
-        }
-    }
-
-    static void StopProcess(string name)
-    {
-        try
-        {
-            foreach (var p in Process.GetProcessesByName(name))
-            {
-                try
-                {
-                    p.Kill(entireProcessTree: true);
-                    p.WaitForExit(4000);
-                }
-                catch { /* ignore */ }
-                finally { p.Dispose(); }
-            }
+            var p = Path.Combine(DataDir, "zones.json");
+            if (!File.Exists(p))
+                return 1;
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(p));
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                return Math.Clamp(doc.RootElement.GetArrayLength(), 1, 16);
         }
         catch { /* ignore */ }
+        return 1;
     }
 
     static void WriteLog(StringBuilder log)

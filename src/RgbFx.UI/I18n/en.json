@@ -39,6 +39,8 @@
   "dynamic.start": "Start",
   "dynamic.stop": "Stop",
   "dynamic.source": "Source",
+  "dynamic.unsupported": "Windows Dynamic Lighting is not available (needs Windows 11 22H2 or later, this build is {0}).",
+  "dynamic.unsupported.title": "Dynamic Lighting unavailable",
   "aura.status.missing": "Not installed",
   "aura.status.registered": "Registered",
   "aura.status.active": "Armoury is sending",

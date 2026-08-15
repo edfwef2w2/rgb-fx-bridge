@@ -12,12 +12,12 @@ public sealed class HttpApiSink : ILightingSink
     private DateTime _lastSent = DateTime.MinValue;
     private readonly TimeSpan _minInterval;
 
-    public HttpApiSink(MysticLightApiClient client, ZoneMapper mapper, int maxFrameHz = 15, string mode = "Static")
+    public HttpApiSink(MysticLightApiClient client, ZoneMapper mapper, int maxFrameHz = 15, string mode = "Direct")
     {
         _client = client;
         _mapper = mapper;
-        // Static is the most reliable across MSI 162/185 boards; Direct aliases Static on many boards.
-        _mode = string.IsNullOrWhiteSpace(mode) ? "Static" : mode;
+        _mode = "Direct";
+        _ = mode;
         var hz = Math.Clamp(maxFrameHz, 1, 60);
         _minInterval = TimeSpan.FromMilliseconds(1000.0 / hz);
     }

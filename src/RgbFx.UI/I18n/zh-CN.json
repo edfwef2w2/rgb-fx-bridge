@@ -39,6 +39,8 @@
   "dynamic.start": "开启",
   "dynamic.stop": "停止",
   "dynamic.source": "来源",
+  "dynamic.unsupported": "此系统不支持 Windows 动态光效（需要 Windows 11 22H2 或更高，当前内部版本 {0}）。",
+  "dynamic.unsupported.title": "动态光效不可用",
   "aura.status.missing": "未安装",
   "aura.status.registered": "已注册",
   "aura.status.active": "奥创正在下发",

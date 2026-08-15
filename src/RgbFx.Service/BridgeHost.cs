@@ -79,21 +79,28 @@ public sealed class BridgeHost
         {
             using var client = new MysticLightApiClient(target.BaseUrl, target.ApiToken);
             var zonesResp = await client.GetZonesAsync(ct).ConfigureAwait(false);
-            var zoneNames = zonesResp?.Zones?.Select(z => z.Name!).Where(n => n != null).ToList()
-                            ?? new List<string> { "JRGB1", "JRAINBOW1", "ONBOARD" };
+            var zoneInfos = zonesResp?.Zones?
+                                .Where(z => !string.IsNullOrWhiteSpace(z.Name))
+                                .ToList()
+                            ?? new List<ZoneInfo>
+                            {
+                                new() { Name = "JRGB1" },
+                                new() { Name = "JRAINBOW1", Async = true },
+                                new() { Name = "ONBOARD" },
+                            };
+            var zoneNames = zoneInfos.Select(z => z.Name!).ToList();
 
-            // One virtual lamp per board UI zone — 1:1 mapping, no phantom JRAINBOW2
             var zoneCount = Math.Max(zoneNames.Count, 1);
             var device = LampArrayDeviceDescription.CreateDefaultChassis(zoneCount);
-            var mapper = new ZoneMapper(zoneNames!, device: null);
+            var hw = zonesResp?.Lighting?.HwLeds ?? 72;
+            var mapper = new ZoneMapper(zoneInfos, hw, device);
 
             var caps = await client.GetCapabilitiesAsync(ct).ConfigureAwait(false);
             var hz = Config.MaxFrameHz;
             if (caps?.Limits?.MaxFrameHz > 0)
                 hz = Math.Min(hz, caps.Limits.MaxFrameHz);
 
-            // Static is reliable on MS-7B17/1720 162-byte boards
-            var sink = new HttpApiSink(client, mapper, hz, mode: "Static");
+            var sink = new HttpApiSink(client, mapper, hz, mode: "Direct");
             var source = LightingSourceFactory.Create(Config.SourceMode, zoneCount);
             var zoneLabel = string.Join(",", zoneNames!);
             Status = $"forwarding ({Config.SourceMode}) zones=[{zoneLabel}] → {target.BaseUrl}";

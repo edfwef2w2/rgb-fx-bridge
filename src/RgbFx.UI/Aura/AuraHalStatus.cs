@@ -20,10 +20,30 @@ public sealed class AuraHalStatus
     public bool IsSending =>
         LastSetEffectAt is { } t && DateTime.Now - t < LiveWindow;
 
-    public static string LogPath =>
+    public static string DataDir =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "RgbFx", "AacHal", "aachal.log");
+            "RgbFx", "AacHal");
+
+    public static string LogPath => Path.Combine(DataDir, "aachal.log");
+
+    public static void ClearRuntimeLogs()
+    {
+        foreach (var name in new[] { "aachal.log", "setup.log", "last-capability.txt" })
+        {
+            var p = Path.Combine(DataDir, name);
+            try
+            {
+                if (File.Exists(p))
+                    File.Delete(p);
+            }
+            catch
+            {
+                try { File.WriteAllText(p, ""); }
+                catch { /* still locked */ }
+            }
+        }
+    }
 
     public static string UrlFilePath =>
         Path.Combine(
@@ -44,6 +64,7 @@ public sealed class AuraHalStatus
                      @"SOFTWARE\WOW6432Node\Classes\CLSID\" + Clsid + @"\LocalServer32",
                      @"SOFTWARE\Classes\WOW6432Node\CLSID\" + Clsid + @"\LocalServer32",
                      @"SOFTWARE\Classes\CLSID\" + Clsid + @"\LocalServer32",
+                     @"SOFTWARE\WOW6432Node\Classes\CLSID\{9C9E903E-BBC7-4A0E-8326-ED6AC85B9FCC}\Instance\{E9BBD754-6CF4-492E-BA89-782177A2771B}\Instance\" + Clsid,
                  })
         {
             try
@@ -139,7 +160,7 @@ public sealed class AuraHalStatus
         s = new string(chars).Trim().Trim('-');
         if (s.Length > 48)
             s = s[..48];
-        return s.Length > 0 ? s : Environment.MachineName;
+        return s;
     }
 
     public static void WriteDisplayName(string? name)
@@ -165,6 +186,6 @@ public sealed class AuraHalStatus
             }
         }
         catch { /* ignore */ }
-        return SanitizeHostName(Environment.MachineName);
+        return "";
     }
 }

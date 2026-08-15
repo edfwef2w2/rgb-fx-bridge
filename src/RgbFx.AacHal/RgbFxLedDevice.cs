@@ -15,22 +15,54 @@ public sealed class RgbFxLedDevice :
     ICustomQueryInterface
 {
     private readonly MsiFrameSink _sink;
+    private readonly string[] _zones;
+    private readonly string _title;
+    private readonly int _argbId;
+    private readonly bool _keyboard;
     private int _ledCount;
     private readonly object _gate = new();
     private uint[] _lastColors;
     private uint _lastEffect = 1;
-    private CancellationTokenSource? _animCts;
 
-    public RgbFxLedDevice(MsiFrameSink sink, int ledCount = CapabilityBuilder.DefaultLedCount)
+    public RgbFxLedDevice(
+        MsiFrameSink sink,
+        string zone,
+        string title,
+        int argbId,
+        int ledCount = CapabilityBuilder.DefaultLedCount)
+        : this(sink, new[] { zone }, title, argbId, ledCount, keyboard: false)
+    {
+    }
+
+    public RgbFxLedDevice(
+        MsiFrameSink sink,
+        IReadOnlyList<string> zones,
+        string title,
+        int argbId,
+        int ledCount = CapabilityBuilder.DefaultLedCount,
+        bool keyboard = false)
     {
         _sink = sink;
-        _ledCount = Math.Clamp(ledCount, 1, 120);
+        _zones = zones.Where(z => !string.IsNullOrWhiteSpace(z)).ToArray();
+        _title = title;
+        _argbId = argbId;
+        _keyboard = keyboard;
+        _ledCount = Math.Clamp(ledCount, 1, AuraLedCap());
         _lastColors = new uint[_ledCount];
         for (int i = 0; i < _ledCount; i++)
             _lastColors[i] = 0x00FFFFFF;
     }
 
+    public string Zone => _zones.Length > 0 ? _zones[0] : "";
+    public string Title => _title;
+
     public int LedCount => _ledCount;
+
+    static int AuraLedCap()
+    {
+        var n = ZoneCatalog.LoadLighting().AuraLeds;
+        return Math.Clamp(n, 1, CapabilityBuilder.MaxReportedLeds);
+    }
 
     CustomQueryInterfaceResult ICustomQueryInterface.GetInterface(ref Guid iid, out IntPtr ppv)
     {
@@ -88,7 +120,7 @@ public sealed class RgbFxLedDevice :
     {
         lock (_gate)
         {
-            int n = Math.Clamp((int)ledCount, 1, 120);
+            int n = Math.Clamp((int)ledCount, 1, AuraLedCap());
             if (n != _ledCount)
             {
                 _ledCount = n;
@@ -196,7 +228,7 @@ public sealed class RgbFxLedDevice :
 
     int GetCapabilityCore(out string capability)
     {
-        capability = CapabilityBuilder.BuildDefault(_ledCount);
+        capability = CapabilityBuilder.BuildDefault(_ledCount, _title, _argbId);
         Log($"GetCapability leds={_ledCount} bytes={capability.Length}");
         try
         {
@@ -225,36 +257,15 @@ public sealed class RgbFxLedDevice :
                         _lastColors[i] = arr[i % arr.Length];
                 }
 
-                Log($"SetEffect id={effectId} n={numberOfColors} speed={speed} dir={direction} opt={hasOpt} sample=0x{(arr.Length > 0 ? arr[0] : 0):X8}");
+                uint s0 = arr.Length > 0 ? arr[0] : 0;
+                uint s1 = arr.Length > 1 ? arr[arr.Length / 2] : s0;
+                uint s2 = arr.Length > 2 ? arr[^1] : s0;
+                Log($"SetEffect id={effectId} n={numberOfColors} speed={speed} dir={direction} opt={hasOpt} kb={_keyboard} samples=0x{s0:X8},0x{s1:X8},0x{s2:X8}");
 
-                StopAnim_NoLock();
-
-                switch (effectId)
-                {
-                    case 101:
-                        _sink.Off();
-                        break;
-                    case 1:
-                    case 2:
-                    case 3:
-                    case 4:
-                    case 17:
-                        if (arr.Length > 0)
-                            _sink.ApplyColors(Expand(arr));
-                        break;
-                    case 5:
-                        StartRainbow_NoLock(speed);
-                        break;
-                    case 13:
-                        StartStarry_NoLock(speed);
-                        break;
-                    default:
-                        if (arr.Length > 0)
-                            _sink.ApplyColors(Expand(arr));
-                        else
-                            StartRainbow_NoLock(speed);
-                        break;
-                }
+                if (effectId == 101)
+                    OffAll();
+                else
+                    PushColors(arr.Length > 0 ? Expand(arr) : _lastColors, effectId);
             }
 
             return 0;
@@ -274,6 +285,20 @@ public sealed class RgbFxLedDevice :
         return o;
     }
 
+    void PushColors(uint[] colors, uint effectId = 0)
+    {
+        if (_zones.Length == 0)
+            return;
+        _sink.ApplyColors(_zones, colors, effectId);
+    }
+
+    void OffAll()
+    {
+        if (_zones.Length == 0)
+            return;
+        _sink.Off(_zones);
+    }
+
     static uint[] ReadColors(IntPtr colors, uint numberOfColors)
     {
         if (colors == IntPtr.Zero || numberOfColors == 0)
@@ -283,86 +308,6 @@ public sealed class RgbFxLedDevice :
         for (int i = 0; i < n; i++)
             arr[i] = (uint)Marshal.ReadInt32(colors, i * 4);
         return arr;
-    }
-
-    void StopAnim_NoLock()
-    {
-        try { _animCts?.Cancel(); } catch { /* ignore */ }
-        _animCts = null;
-    }
-
-    void StartRainbow_NoLock(uint speed)
-    {
-        var cts = new CancellationTokenSource();
-        _animCts = cts;
-        var period = speed switch
-        {
-            0 => 80,
-            1 => 50,
-            2 => 30,
-            _ => 60,
-        };
-        _ = Task.Run(async () =>
-        {
-            double t = 0;
-            while (!cts.IsCancellationRequested)
-            {
-                var cols = new uint[_ledCount];
-                for (int i = 0; i < _ledCount; i++)
-                {
-                    var hue = (t + i * (360.0 / _ledCount)) % 360.0;
-                    cols[i] = HsvToBgr(hue, 1, 1);
-                }
-                _sink.ApplyColors(cols);
-                t += 8;
-                try { await Task.Delay(period, cts.Token); }
-                catch { break; }
-            }
-        }, cts.Token);
-    }
-
-    void StartStarry_NoLock(uint speed)
-    {
-        var cts = new CancellationTokenSource();
-        _animCts = cts;
-        var period = speed >= 2 ? 40 : 90;
-        var rng = new Random();
-        _ = Task.Run(async () =>
-        {
-            var cols = new uint[_ledCount];
-            while (!cts.IsCancellationRequested)
-            {
-                Array.Clear(cols);
-                int sparks = Math.Max(1, _ledCount / 4);
-                for (int s = 0; s < sparks; s++)
-                {
-                    int i = rng.Next(_ledCount);
-                    byte v = (byte)rng.Next(80, 256);
-                    cols[i] = (uint)(v | (v << 8) | (v << 16));
-                }
-                _sink.ApplyColors(cols);
-                try { await Task.Delay(period, cts.Token); }
-                catch { break; }
-            }
-        }, cts.Token);
-    }
-
-    static uint HsvToBgr(double h, double s, double v)
-    {
-        double c = v * s;
-        double x = c * (1 - Math.Abs(h / 60 % 2 - 1));
-        double m = v - c;
-        double r1 = 0, g1 = 0, b1 = 0;
-        if (h < 60) { r1 = c; g1 = x; }
-        else if (h < 120) { r1 = x; g1 = c; }
-        else if (h < 180) { g1 = c; b1 = x; }
-        else if (h < 240) { g1 = x; b1 = c; }
-        else if (h < 300) { r1 = x; b1 = c; }
-        else { r1 = c; b1 = x; }
-        byte R = (byte)((r1 + m) * 255);
-        byte G = (byte)((g1 + m) * 255);
-        byte B = (byte)((b1 + m) * 255);
-        return (uint)(B << 16 | G << 8 | R);
     }
 
     static void Log(string msg)

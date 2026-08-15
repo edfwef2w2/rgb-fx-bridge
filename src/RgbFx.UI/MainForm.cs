@@ -36,6 +36,7 @@ public sealed class MainForm : Form
     readonly Button _primary = new();
 
     readonly Label _debugTitle = new();
+    readonly ToolTip _tips = new() { AutoPopDelay = 12000, InitialDelay = 200, ReshowDelay = 200 };
     readonly Button _copy = new();
     readonly TextBox _debug = new()
     {
@@ -132,7 +133,15 @@ public sealed class MainForm : Form
         Controls.Add(_modeHost);
         Controls.Add(header);
 
-        _modeDyn.Click += (_, _) => SetUiMode("dynamic");
+        _modeDyn.Click += (_, _) =>
+        {
+            if (!DynamicLightingOs.Supported)
+            {
+                ShowDynamicUnsupportedPrompt();
+                return;
+            }
+            SetUiMode("dynamic");
+        };
         _modeAura.Click += (_, _) => SetUiMode("aura");
         _change.Click += (_, _) => OnChangeTarget();
         _targets.SelectedIndexChanged += (_, _) => OnTargetPicked();
@@ -166,6 +175,15 @@ public sealed class MainForm : Form
         _tick.Tick += (_, _) => RefreshAll();
         Load += (_, _) =>
         {
+            if (!DynamicLightingOs.Supported)
+            {
+                var cfg = BridgeConfig.Load();
+                if (!string.Equals(cfg.UiMode, "aura", StringComparison.OrdinalIgnoreCase))
+                {
+                    cfg.UiMode = "aura";
+                    cfg.Save();
+                }
+            }
             ApplyLanguage();
             SyncFromConfig();
             RefreshTargetCombo();
@@ -206,6 +224,12 @@ public sealed class MainForm : Form
 
     void SetUiMode(string mode)
     {
+        if (string.Equals(mode, "dynamic", StringComparison.OrdinalIgnoreCase)
+            && !DynamicLightingOs.Supported)
+        {
+            ShowDynamicUnsupportedPrompt();
+            return;
+        }
         var cfg = BridgeConfig.Load();
         cfg.UiMode = mode;
         cfg.Save();
@@ -231,6 +255,11 @@ public sealed class MainForm : Form
         _title.Text = Locale.T("app.title");
         _modeDyn.Text = Locale.T("mode.dynamic");
         _modeAura.Text = Locale.T("mode.aura");
+        _modeDyn.Enabled = true;
+        _modeDyn.Cursor = DynamicLightingOs.Supported ? Cursors.Hand : Cursors.No;
+        _tips.SetToolTip(_modeDyn, DynamicLightingOs.Supported
+            ? ""
+            : Locale.T("dynamic.unsupported", DynamicLightingOs.Build));
         _msiLabel.Text = Locale.T("target.label");
         _change.Text = Locale.T("target.change");
         _debugTitle.Text = Locale.T("debug.title");
@@ -241,10 +270,28 @@ public sealed class MainForm : Form
         RefreshModePanel();
     }
 
+    void ShowDynamicUnsupportedPrompt()
+    {
+        MessageBox.Show(
+            this,
+            Locale.T("dynamic.unsupported", DynamicLightingOs.Build),
+            Locale.T("dynamic.unsupported.title"),
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
+    }
+
     void PaintModeButtons(bool aura)
     {
-        _modeDyn.BackColor = aura ? Card : Accent;
-        _modeDyn.ForeColor = aura ? Fg : Color.White;
+        if (!DynamicLightingOs.Supported)
+        {
+            _modeDyn.BackColor = Color.FromArgb(40, 40, 46);
+            _modeDyn.ForeColor = Muted;
+        }
+        else
+        {
+            _modeDyn.BackColor = aura ? Card : Accent;
+            _modeDyn.ForeColor = aura ? Fg : Color.White;
+        }
         _modeAura.BackColor = aura ? Accent : Card;
         _modeAura.ForeColor = aura ? Color.White : Fg;
     }
@@ -307,36 +354,51 @@ public sealed class MainForm : Form
     async Task PersistIdentityAsync(string url, string? token)
     {
         AuraHalStatus.WriteMsiUrl(url);
-        var host = await ResolveHostNameAsync(url, token);
-        AuraHalStatus.WriteDisplayName(host);
+        var host = await ResolveDisplayPrefixAsync(url, token);
+        if (!string.IsNullOrWhiteSpace(host) && !string.Equals(host, "device", StringComparison.OrdinalIgnoreCase))
+            AuraHalStatus.WriteDisplayName(host);
+        try
+        {
+            using var client = new MysticLightApiClient(url, token, TimeSpan.FromSeconds(3));
+            var zones = await client.GetZonesAsync();
+            var list = (zones?.Zones ?? new List<ZoneInfo>())
+                .Where(z => !string.IsNullOrWhiteSpace(z.Name))
+                .Select(z => new { name = z.Name, display = z.Display })
+                .ToList();
+            var dir = Path.GetDirectoryName(AuraHalStatus.DisplayNamePath)!;
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(
+                Path.Combine(dir, "zones.json"),
+                System.Text.Json.JsonSerializer.Serialize(list, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch { /* HAL will GET /zones itself */ }
     }
 
-    static async Task<string> ResolveHostNameAsync(string url, string? token)
+    static async Task<string> ResolveDisplayPrefixAsync(string url, string? token)
     {
+        string? host = null, board = null;
         try
         {
             using var client = new MysticLightApiClient(url, token, TimeSpan.FromSeconds(2));
-            var health = await client.GetHealthAsync();
-            if (!string.IsNullOrWhiteSpace(health?.HostName))
-                return health.HostName!;
-        }
-        catch { /* fall through */ }
-
-        try
-        {
-            if (RemoteUrl.TryNormalize(url, out var n, out _))
+            try
             {
-                var uri = new Uri(n);
-                if (uri.IsLoopback)
-                    return Environment.MachineName;
-                var entry = await Dns.GetHostEntryAsync(uri.Host);
-                if (!string.IsNullOrWhiteSpace(entry.HostName))
-                    return entry.HostName;
+                var zones = await client.GetZonesAsync();
+                host = zones?.HostName;
+                board = zones?.BoardId;
             }
+            catch { /* try health */ }
+
+            try
+            {
+                var health = await client.GetHealthAsync();
+                host ??= health?.HostName;
+                board ??= health?.BoardId;
+            }
+            catch { /* fall through */ }
         }
         catch { /* fall through */ }
 
-        return Environment.MachineName;
+        return DeviceIdentity.ComposePrefix(host, board);
     }
 
     void RefreshTargetCombo()
@@ -410,11 +472,14 @@ public sealed class MainForm : Form
 
     static string ComboName(string? saved, DiscoveredDevice? d)
     {
-        if (!string.IsNullOrWhiteSpace(d?.HostName))
-            return d!.HostName!;
-        if (!string.IsNullOrWhiteSpace(d?.DisplayName))
-            return d!.DisplayName;
-        if (!string.IsNullOrWhiteSpace(saved))
+        if (d is not null)
+        {
+            var prefix = DeviceIdentity.ComposePrefix(d.HostName, d.BoardId, d.DisplayName);
+            if (!string.IsNullOrWhiteSpace(prefix))
+                return prefix;
+        }
+
+        if (!string.IsNullOrWhiteSpace(saved) && !DeviceIdentity.IsPlaceholder(saved))
             return saved!;
         return "";
     }
@@ -528,7 +593,7 @@ public sealed class MainForm : Form
         var cfg = BridgeConfig.Load();
         if (string.Equals(cfg.UiMode, "aura", StringComparison.OrdinalIgnoreCase))
             await RunAuraAsync();
-        else
+        else if (DynamicLightingOs.Supported)
             ToggleDynamic();
     }
 
@@ -669,6 +734,7 @@ public sealed class MainForm : Form
         _source.Visible = !aura;
         if (aura)
         {
+            _modeStatus.ForeColor = Fg;
             var st = AuraHalStatus.Read();
             if (!st.Registered)
                 _modeStatus.Text = Locale.T("aura.status.missing");
@@ -677,13 +743,25 @@ public sealed class MainForm : Form
             else
                 _modeStatus.Text = Locale.T("aura.status.registered");
             _primary.Text = Locale.T(st.Registered ? "aura.uninstall" : "aura.install");
+            _primary.Enabled = !_busy;
+            _primary.Visible = true;
+        }
+        else if (!DynamicLightingOs.Supported)
+        {
+            _modeStatus.Text = Locale.T("dynamic.unsupported", DynamicLightingOs.Build);
+            _modeStatus.ForeColor = Bad;
+            _source.Visible = false;
+            _primary.Visible = false;
         }
         else
         {
+            _modeStatus.ForeColor = Fg;
             _modeStatus.Text = IsForwarding()
                 ? Locale.T("dynamic.status.running")
                 : Locale.T("dynamic.status.stopped");
             _primary.Text = Locale.T(IsForwarding() ? "dynamic.stop" : "dynamic.start");
+            _primary.Enabled = !_busy;
+            _primary.Visible = true;
         }
     }
 
@@ -696,7 +774,7 @@ public sealed class MainForm : Form
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"{Locale.T("debug.target")}: {t?.Name ?? "-"}  {t?.BaseUrl ?? "-"}");
         sb.AppendLine($"{Locale.T("debug.scan")}: {(string.IsNullOrEmpty(LanScanCache.Summary) ? "-" : LanScanCache.Summary)}  ({LanScanCache.Devices.Count})");
-        sb.AppendLine($"{Locale.T("debug.mode")}: {cfg.UiMode}");
+        sb.AppendLine($"{Locale.T("debug.mode")}: {cfg.UiMode}  dynOS={(DynamicLightingOs.Supported ? "yes" : "no")} build={DynamicLightingOs.Build}");
         sb.AppendLine($"{Locale.T("debug.source")}: {cfg.SourceMode}");
         sb.AppendLine($"{Locale.T("debug.frames")}: {_host.FramesForwarded}");
         sb.AppendLine($"{Locale.T("debug.error")}: {_host.LastError ?? "-"}");
@@ -715,6 +793,7 @@ public sealed class MainForm : Form
         _tick.Stop();
         try { _scanCts?.Cancel(); } catch { /* ignore */ }
         _host.Stop();
+        AuraHalStatus.ClearRuntimeLogs();
         base.OnFormClosed(e);
     }
 

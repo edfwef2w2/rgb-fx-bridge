@@ -15,19 +15,97 @@ public sealed class RgbFxAacHal :
     ICustomQueryInterface
 {
     private readonly MsiFrameSink _sink = new();
-    private readonly RgbFxLedDevice _device;
+    private readonly object _devGate = new();
+    private RgbFxLedDevice[] _devices;
 
     public RgbFxAacHal()
     {
-        var n = CapabilityBuilder.DefaultLedCount;
-        if (int.TryParse(Environment.GetEnvironmentVariable("RGBFX_LED_COUNT"), out var lc) && lc > 0)
-            n = Math.Clamp(lc, 1, 120);
-        _device = new RgbFxLedDevice(_sink, n);
-        Log($"RgbFxAacHal constructed pid={Environment.ProcessId} leds={n} mode={Enum2Mode}");
+        _devices = Array.Empty<RgbFxLedDevice>();
+        RebuildDevices(ZoneCatalog.FetchAlways());
+        Log($"RgbFxAacHal constructed pid={Environment.ProcessId} zones={_devices.Length} type={CapabilityBuilder.ResolveType()} mode={Enum2Mode}");
+    }
+
+    void RebuildDevices(IReadOnlyList<ZoneEntry> zones)
+    {
+        var lighting = ZoneCatalog.LoadLighting();
+        var n = lighting.AuraLeds;
+        var host = ReadHost();
+        var type = CapabilityBuilder.ResolveType();
+        RgbFxLedDevice[] next;
+        if (CapabilityBuilder.IsKeyboard(type))
+        {
+            var names = zones
+                .Select(z => z.Name)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToArray();
+            n = lighting.AuraLeds;
+            next = names.Length == 0
+                ? Array.Empty<RgbFxLedDevice>()
+                : new[] { new RgbFxLedDevice(_sink, names, host, argbId: 0, ledCount: n, keyboard: true) };
+            Log($"keyboard devices={next.Length} leds={n} aura={lighting.AuraLeds} hw={lighting.HwLeds} type={type} zones={string.Join(",", names)}");
+        }
+        else
+        {
+            next = new RgbFxLedDevice[zones.Count];
+            for (var i = 0; i < zones.Count; i++)
+            {
+                var z = zones[i];
+                var zoneId = SanitizeZoneToken(z.Name);
+                if (zoneId.Length == 0)
+                    zoneId = "zone" + (i + 1);
+                next[i] = new RgbFxLedDevice(_sink, z.Name, host + "-" + zoneId, argbId: 10 + i, ledCount: n);
+            }
+            Log("zones=" + string.Join(",", zones.Select(z => z.Name)));
+        }
+        lock (_devGate)
+            _devices = next;
+    }
+
+    static string ReadHost()
+    {
+        try
+        {
+            var p = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "RgbFx", "AacHal", "display-name.txt");
+            if (File.Exists(p))
+            {
+                var s = SanitizeZoneToken(File.ReadAllText(p));
+                if (s.Length > 0)
+                    return s;
+            }
+        }
+        catch { /* ignore */ }
+        return ZoneCatalog.ComposePrefix(null, null);
+    }
+
+    static string SanitizeZoneToken(string? raw)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var c in raw ?? "")
+        {
+            if (c is (>= 'A' and <= 'Z') or (>= 'a' and <= 'z') or (>= '0' and <= '9') or '-' or '_')
+                sb.Append(c);
+        }
+        var s = sb.ToString().Trim('-', '_');
+        return s.Length > 48 ? s[..48] : s;
+    }
+
+    int DeviceCount
+    {
+        get { lock (_devGate) return _devices.Length; }
+    }
+
+    RgbFxLedDevice[] SnapshotDevices()
+    {
+        lock (_devGate)
+            return _devices;
     }
 
     static string Enum2Mode =>
         (Environment.GetEnvironmentVariable("RGBFX_ENUM2_MODE") ?? "arrayiid").Trim().ToLowerInvariant();
+
+    static bool PreferVaried => !CapabilityBuilder.IsKeyboard(CapabilityBuilder.ResolveType());
 
     CustomQueryInterfaceResult ICustomQueryInterface.GetInterface(ref Guid iid, out IntPtr ppv)
     {
@@ -96,16 +174,18 @@ public sealed class RgbFxAacHal :
     {
         if (devices == IntPtr.Zero || count == 0)
         {
-            count = 1;
-            Log("Enumerate phase1 count=1");
+            RebuildDevices(ZoneCatalog.FetchAlways());
+            count = (uint)DeviceCount;
+            Log($"Enumerate phase1 count={count}");
             return 0;
         }
 
-        count = 1;
-        // Prefer richest device interface for native clients
-        var pDev = GetDeviceIfacePtr(preferVaried: true);
-        Marshal.WriteIntPtr(devices, pDev);
-        Log($"Enumerate phase2 punk=0x{pDev.ToInt64():X}");
+        var snap = SnapshotDevices();
+        var write = Math.Min((int)count, snap.Length);
+        for (var i = 0; i < write; i++)
+            Marshal.WriteIntPtr(devices, i * IntPtr.Size, GetDeviceIfacePtr(snap[i], PreferVaried));
+        count = (uint)write;
+        Log($"Enumerate phase2 n={write}");
         return 0;
     }
 
@@ -114,7 +194,7 @@ public sealed class RgbFxAacHal :
         // Real MB HAL two-phase Enumerate2:
         //  Phase1: *count == 0  → set *count = N, leave VARIANT empty
         //  Phase2: *count  > 0  → fill VARIANT (default VT_ARRAY|VT_UNKNOWN + HAVEIID)
-        const int deviceCount = 1;
+        int deviceCount = DeviceCount;
         uint countIn = 0;
         if (pCount != IntPtr.Zero)
             countIn = unchecked((uint)Marshal.ReadInt32(pCount));
@@ -134,6 +214,8 @@ public sealed class RgbFxAacHal :
 
         if (countIn == 0)
         {
+            RebuildDevices(ZoneCatalog.FetchAlways());
+            deviceCount = DeviceCount;
             if (pCount != IntPtr.Zero)
                 Marshal.WriteInt32(pCount, deviceCount);
             if (pDevicesVariant != IntPtr.Zero)
@@ -159,11 +241,11 @@ public sealed class RgbFxAacHal :
             int hr = mode switch
             {
                 "single" => WriteSingleUnknown(pDevicesVariant),
-                "vector" => WriteArrayUnknown(pDevicesVariant, withIid: false, preferVaried: true),
+                "vector" => WriteArrayUnknown(pDevicesVariant, withIid: false, preferVaried: PreferVaried),
                 "vararray" => WriteArrayVariant(pDevicesVariant),
                 "arraybase" => WriteArrayUnknown(pDevicesVariant, withIid: true, preferVaried: false),
-                // default / arrayiid: SAFEARRAY VT_UNKNOWN + HAVEIID = IAacLedDeviceVariedLedCount
-                _ => WriteArrayUnknown(pDevicesVariant, withIid: true, preferVaried: true),
+                // default / arrayiid: SAFEARRAY VT_UNKNOWN + HAVEIID
+                _ => WriteArrayUnknown(pDevicesVariant, withIid: true, preferVaried: PreferVaried),
             };
 
             if (pCount != IntPtr.Zero)
@@ -183,7 +265,10 @@ public sealed class RgbFxAacHal :
 
     int WriteSingleUnknown(IntPtr pVar)
     {
-        var pDev = GetDeviceIfacePtr(preferVaried: true);
+        var snap = SnapshotDevices();
+        if (snap.Length == 0)
+            return 0;
+        var pDev = GetDeviceIfacePtr(snap[0], PreferVaried);
         Marshal.WriteInt16(pVar, 0, unchecked((short)VariantVt.VT_UNKNOWN));
         Marshal.WriteIntPtr(pVar, 8, pDev);
         return 0;
@@ -191,12 +276,15 @@ public sealed class RgbFxAacHal :
 
     int WriteArrayUnknown(IntPtr pVar, bool withIid, bool preferVaried)
     {
-        var pDev = GetDeviceIfacePtr(preferVaried);
+        var snap = SnapshotDevices();
+        var n = snap.Length;
+        if (n == 0)
+            return 0;
         IntPtr psa;
         if (withIid)
         {
             var iid = new Guid(preferVaried ? AacIds.IAacLedDeviceVariedLedCount : AacIds.IAacLedDevice);
-            var bound = new SafeArrayBound { cElements = 1, lLbound = 0 };
+            var bound = new SafeArrayBound { cElements = (uint)n, lLbound = 0 };
             IntPtr pIid = Marshal.AllocHGlobal(16);
             try
             {
@@ -210,24 +298,27 @@ public sealed class RgbFxAacHal :
         }
         else
         {
-            psa = OleAut.SafeArrayCreateVector(VariantVt.VT_UNKNOWN, 0, 1);
+            psa = OleAut.SafeArrayCreateVector(VariantVt.VT_UNKNOWN, 0, (uint)n);
         }
 
         if (psa == IntPtr.Zero)
         {
-            Marshal.Release(pDev);
             Log("SafeArray create failed");
             return unchecked((int)0x80004005);
         }
 
-        int index = 0;
-        int putHr = OleAut.SafeArrayPutElement(psa, ref index, pDev);
-        Marshal.Release(pDev);
-        if (putHr != 0)
+        for (var i = 0; i < n; i++)
         {
-            OleAut.SafeArrayDestroy(psa);
-            Log($"SafeArrayPutElement hr=0x{putHr:X8}");
-            return putHr;
+            var pDev = GetDeviceIfacePtr(snap[i], preferVaried);
+            int index = i;
+            int putHr = OleAut.SafeArrayPutElement(psa, ref index, pDev);
+            Marshal.Release(pDev);
+            if (putHr != 0)
+            {
+                OleAut.SafeArrayDestroy(psa);
+                Log($"SafeArrayPutElement[{i}] hr=0x{putHr:X8}");
+                return putHr;
+            }
         }
 
         // Log SAFEARRAY header (x86)
@@ -247,33 +338,33 @@ public sealed class RgbFxAacHal :
 
     int WriteArrayVariant(IntPtr pVar)
     {
-        // VT_ARRAY|VT_VARIANT with one element VT_UNKNOWN
-        var pDev = GetDeviceIfacePtr(preferVaried: true);
-        IntPtr psa = OleAut.SafeArrayCreateVector(VariantVt.VT_VARIANT, 0, 1);
+        var snap = SnapshotDevices();
+        var n = snap.Length;
+        if (n == 0)
+            return 0;
+        IntPtr psa = OleAut.SafeArrayCreateVector(VariantVt.VT_VARIANT, 0, (uint)n);
         if (psa == IntPtr.Zero)
-        {
-            Marshal.Release(pDev);
             return unchecked((int)0x80004005);
-        }
 
-        // Build a 16-byte VARIANT element (x86) or 24-byte (x64)
         int vs = IntPtr.Size == 8 ? 24 : 16;
         IntPtr pElem = Marshal.AllocHGlobal(vs);
         try
         {
-            Zero(pElem, vs);
-            Marshal.WriteInt16(pElem, 0, unchecked((short)VariantVt.VT_UNKNOWN));
-            Marshal.WriteIntPtr(pElem, 8, pDev);
-            int index = 0;
-            // For VT_VARIANT, PutElement copies the VARIANT (and AddRefs punk)
-            int putHr = OleAut.SafeArrayPutElement(psa, ref index, pElem);
-            // Release our local ref; array holds its own via copy
-            Marshal.Release(pDev);
-            if (putHr != 0)
+            for (var i = 0; i < n; i++)
             {
-                OleAut.SafeArrayDestroy(psa);
-                Log($"vararray PutElement hr=0x{putHr:X8}");
-                return putHr;
+                var pDev = GetDeviceIfacePtr(snap[i], PreferVaried);
+                Zero(pElem, vs);
+                Marshal.WriteInt16(pElem, 0, unchecked((short)VariantVt.VT_UNKNOWN));
+                Marshal.WriteIntPtr(pElem, 8, pDev);
+                int index = i;
+                int putHr = OleAut.SafeArrayPutElement(psa, ref index, pElem);
+                Marshal.Release(pDev);
+                if (putHr != 0)
+                {
+                    OleAut.SafeArrayDestroy(psa);
+                    Log($"vararray PutElement[{i}] hr=0x{putHr:X8}");
+                    return putHr;
+                }
             }
         }
         finally
@@ -286,9 +377,9 @@ public sealed class RgbFxAacHal :
         return 0;
     }
 
-    IntPtr GetDeviceIfacePtr(bool preferVaried)
+    IntPtr GetDeviceIfacePtr(RgbFxLedDevice device, bool preferVaried)
     {
-        var unk = Marshal.GetIUnknownForObject(_device);
+        var unk = Marshal.GetIUnknownForObject(device);
         try
         {
             if (preferVaried)

@@ -116,11 +116,18 @@ public static class LanScanner
 
         var hostName = health.HostName;
         var board = health.BoardId;
+        if (string.IsNullOrWhiteSpace(board) || DeviceIdentity.IsPlaceholder(hostName))
+        {
+            var extra = await TryFetchIdentity(http, root, ct).ConfigureAwait(false);
+            hostName ??= extra.hostName;
+            board ??= extra.boardId;
+        }
+
         string host;
         try { host = new Uri(root).Host; }
         catch { host = root; }
 
-        var label = FormatName(hostName, board, host);
+        var label = DeviceIdentity.ComposePrefix(hostName, board, host);
         return new DiscoveredDevice
         {
             BaseUrl = root.TrimEnd('/'),
@@ -134,14 +141,24 @@ public static class LanScanner
     }
 
     public static string FormatName(string? hostName, string? boardId, string fallbackHost)
+        => DeviceIdentity.ComposePrefix(hostName, boardId, fallbackHost);
+
+    static async Task<(string? hostName, string? boardId)> TryFetchIdentity(
+        HttpClient http, string root, CancellationToken ct)
     {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(hostName))
-            parts.Add(hostName.Trim());
-        if (!string.IsNullOrWhiteSpace(boardId) &&
-            !string.Equals(boardId, hostName, StringComparison.OrdinalIgnoreCase))
-            parts.Add(boardId.Trim());
-        return parts.Count > 0 ? string.Join(" · ", parts) : fallbackHost;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, root + "api/v1/zones");
+            using var res = await http.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct)
+                .ConfigureAwait(false);
+            var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var z = JsonSerializer.Deserialize<ZonesResponse>(body, JsonOpts);
+            return (z?.HostName, z?.BoardId);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     static bool LooksLikeMystic(HttpResponseMessage res, string body, out HealthResponse? health)
